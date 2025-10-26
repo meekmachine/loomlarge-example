@@ -1,53 +1,40 @@
-import React, { useCallback, useRef } from 'react';
-import * as THREE from 'three';
+import React, { useCallback, useMemo, useState } from 'react';
 import CharacterGLBScene from './scenes/CharacterGLBScene';
 import AUQuickPanel from './components/au/AUQuickPanel';
-import { AU_TO_MORPHS, ALIASES } from './engine/arkit/shapeDict';
+import { EngineThree } from './engine/EngineThree';
+import { useThreeState } from './context/threeContext';
 import './styles.css';
 
 export default function App() {
-  const meshesRef = useRef<THREE.Mesh[]>([]);
+  // Access the global three context
+  const threeCtx = useThreeState();
 
-  const handleReady = useCallback(({ meshes }) => {
-    meshesRef.current = meshes;
-  }, []);
+  // Create and persist engine
+  const [engine] = useState(() => new EngineThree());
 
-  const applyAU = useCallback((id: number, value: number) => {
-    const keys = AU_TO_MORPHS[id] || [];
-    if (!keys.length) return;
-    const v = Math.max(0, Math.min(1, value));
-    for (const m of meshesRef.current) {
-      const name = (m.name || '').toLowerCase();
-      if (name.includes('occlusion') || name.includes('tearline')) continue;
-      // @ts-ignore
-      const dict: Record<string, number> | undefined = m.morphTargetDictionary;
-      // @ts-ignore
-      const infl: number[] | undefined = m.morphTargetInfluences;
-      if (!dict || !infl) continue;
-      for (const k of keys) {
-        let idx = dict[k];
-        if (idx === undefined && ALIASES[k]) {
-          for (const alt of ALIASES[k]) { if (dict[alt] !== undefined) { idx = dict[alt]; break; } }
-        }
-        if (idx !== undefined) infl[idx] = v;
-      }
-    }
-  }, []);
+  const handleReady = useCallback(
+    ({ meshes, model }: { meshes: any[]; model?: any }) => {
+      engine.onReady({ meshes, model });
+    },
+    [engine]
+  );
 
-  const setMorph = useCallback((key: string, value: number) => {
-    const v = Math.max(0, Math.min(1, value));
-    for (const m of meshesRef.current) {
-      const name = (m.name || '').toLowerCase();
-      if (name.includes('occlusion') || name.includes('tearline')) continue;
-      // @ts-ignore
-      const dict: Record<string, number> | undefined = m.morphTargetDictionary;
-      // @ts-ignore
-      const infl: number[] | undefined = m.morphTargetInfluences;
-      if (!dict || !infl) continue;
-      const idx = dict[key];
-      if (idx !== undefined) infl[idx] = v;
-    }
-  }, []);
+  const applyAU = useCallback(
+    (id: number | string, value: number) => {
+      engine.setAU(id, value);
+    },
+    [engine]
+  );
+
+  const setMorph = useCallback(
+    (key: string, value: number) => {
+      engine.setMorph(key, value);
+    },
+    [engine]
+  );
+
+  // Enrich the three context dynamically
+  threeCtx.engine = engine;
 
   return (
     <div className="fullscreen-scene">
