@@ -67,10 +67,15 @@ export default function App() {
     target:   [1.851, 5.597, -0.000] as [number, number, number],
   }), []);
 
+  // Use GitHub Release for large GLB file in production, local for dev
+  const glbSrc = import.meta.env.PROD
+    ? "https://github.com/meekmachine/LoomLarge/releases/download/v1.0.0/jonathan.glb"
+    : "/characters/jonathan.glb";
+
   return (
     <div className="fullscreen-scene">
       <CharacterGLBScene
-        src="/characters/jonathan.glb"
+        src={glbSrc}
         className="fullscreen-scene"
         cameraOverride={cameraOverride}
         skyboxUrl="/skyboxes/3BR2D07.jpg"
