@@ -204,7 +204,7 @@ export default function PlaybackControls() {
 
   // Download current curves as JSON
   function handleDownloadJSON() {
-    if (!anim?.getCurves) {
+    if (!anim?.getState) {
       toast({
         title: 'No animation to save',
         status: 'error',
@@ -213,8 +213,9 @@ export default function PlaybackControls() {
       return;
     }
 
-    const curves = anim.getCurves() || {};
-    const data = { curves };
+    const state = anim.getState();
+    const animations = state?.context?.animations || [];
+    const data = { snippets: animations };
 
     const jsonStr = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -274,7 +275,8 @@ export default function PlaybackControls() {
 
   function handleMaxTime(idx: number, val: number) {
     const sn = snippets[idx];
-    anim?.setSnippetMaxTime?.(sn.name, val);
+    // Max time is not a real concept in the new scheduler, just skip this
+    // anim?.setSnippetTime?.(sn.name, val);
   }
 
   function handlePlaybackRate(idx: number, val: number) {

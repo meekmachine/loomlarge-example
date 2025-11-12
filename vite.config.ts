@@ -4,26 +4,26 @@ import { fileURLToPath, URL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export default defineConfig({
-  base: '/LoomLarge/', // GitHub Pages repo name
+export default defineConfig(({ mode }) => ({
+  base: mode === 'production' ? '/LoomLarge/' : '/', // GitHub Pages repo name for production only
   plugins: [
     react(),
-    {
-      name: 'exclude-large-assets',
+    // Exclude large uncompressed GLB from production build
+    mode === 'production' && {
+      name: 'exclude-large-glb',
       writeBundle() {
-        // Remove large GLB file from dist after build (hosted externally)
-        const filePath = path.join(process.cwd(), 'dist', 'characters', 'jonathan.glb');
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log('Removed large GLB file from dist (hosted via GitHub Release)');
+        const glbPath = path.join(process.cwd(), 'dist', 'characters', 'jonathan.glb');
+        if (fs.existsSync(glbPath)) {
+          fs.unlinkSync(glbPath);
+          console.log('Removed jonathan.glb from dist (over 100MB limit)');
         }
       },
     },
-  ],
+  ].filter(Boolean),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
   server: { open: true },
-});
+}));

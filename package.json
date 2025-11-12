@@ -9,8 +9,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "predeploy": "vite build",
-    "deploy": "gh-pages -d dist --dotfiles",
+    "deploy": "bash scripts/deploy.sh",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -6,6 +6,7 @@ import type { Snippet, HostCaps, ScheduleOpts } from './types';
 import { AnimationScheduler as Scheduler } from './animationScheduler';
 
 const clamp01 = (v:number) => Math.min(1, Math.max(0, v));
+const isNum = (s: string) => /^\d+$/.test(s);
 
 function normalize(sn: any): Snippet & { curves: Record<string, Array<{ time:number; intensity:number }>> } {
   if (sn && sn.curves) {
@@ -57,7 +58,7 @@ class _UnusedMinimalScheduler { // NOTE: kept only for reference; not used.
   constructor(machine:any, host: HostCaps){ this.machine = machine; this.host = host; }
   private now(){ return (typeof performance!=='undefined'?performance.now():Date.now()); }
   private currentSnippets(){ return this.machine.getSnapshot().context.animations as any[] as Array<Snippet & { curves: Record<string, Array<{ time:number; intensity:number }>> }>; }
-  private totalDuration(sn: Snippet){ return sn.duration || Math.max(0, ...Object.values((sn as any).curves||{}).map(a => a.length ? a[a.length-1].time : 0)); }
+  private totalDuration(sn: Snippet){ return Math.max(0, ...Object.values((sn as any).curves||{}).map((a: any) => a?.length ? a[a.length-1].time : 0)); }
   private buildTargetMap(snippets: Array<Snippet & { curves: Record<string, Array<{ time:number; intensity:number }>> }>, tPlay: number) {
     const targets = new Map<string, { v:number; pri:number }>();
     for (const sn of snippets){

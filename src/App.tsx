@@ -67,13 +67,8 @@ export default function App() {
     target:   [1.851, 5.597, -0.000] as [number, number, number],
   }), []);
 
-  // Use CORS proxy for GitHub Release in production, local for dev
-  // GitHub Releases don't have CORS headers, so we use allorigins.win as a proxy
-  const glbSrc = import.meta.env.PROD
-    ? "https://api.allorigins.win/raw?url=" + encodeURIComponent("https://github.com/meekmachine/LoomLarge/releases/download/v1.0.0/jonathan.glb")
-    : "/characters/jonathan.glb";
-
-  // Use BASE_URL for skybox to work with GitHub Pages base path
+  // Use BASE_URL for all assets to work with GitHub Pages base path
+  const glbSrc = import.meta.env.BASE_URL + "characters/jonathan.glb";
   const skyboxUrl = import.meta.env.BASE_URL + "skyboxes/3BR2D07.jpg";
 
   return (

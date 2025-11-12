@@ -192,20 +192,20 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
     { node: 'NECK', channel: 'rx', scale: 1, maxDegrees: 4 },
   ],
   61: [
-    { node: 'EYE_L', channel: 'ry', scale: -1, maxDegrees: 15 },
-    { node: 'EYE_R', channel: 'ry', scale: -1, maxDegrees: 15 },
+    { node: 'EYE_L', channel: 'ry', scale: -1, maxDegrees: 25 },
+    { node: 'EYE_R', channel: 'ry', scale: -1, maxDegrees: 25 },
   ],
   62: [
-    { node: 'EYE_L', channel: 'ry', scale: 1, maxDegrees: 15 },
-    { node: 'EYE_R', channel: 'ry', scale: 1, maxDegrees: 15 },
+    { node: 'EYE_L', channel: 'ry', scale: 1, maxDegrees: 25 },
+    { node: 'EYE_R', channel: 'ry', scale: 1, maxDegrees: 25 },
   ],
   63: [
-    { node: 'EYE_L', channel: 'rx', scale: -1, maxDegrees: 12 },
-    { node: 'EYE_R', channel: 'rx', scale: -1, maxDegrees: 12 },
+    { node: 'EYE_L', channel: 'rx', scale: -1, maxDegrees: 20 },
+    { node: 'EYE_R', channel: 'rx', scale: -1, maxDegrees: 20 },
   ],
   64: [
-    { node: 'EYE_L', channel: 'rx', scale: 1, maxDegrees: 12 },
-    { node: 'EYE_R', channel: 'rx', scale: 1, maxDegrees: 12 },
+    { node: 'EYE_L', channel: 'rx', scale: 1, maxDegrees: 20 },
+    { node: 'EYE_R', channel: 'rx', scale: 1, maxDegrees: 20 },
   ],
   // Single-eye (Left) — horizontal (ry) and vertical (rx)
   65: [ { node: 'EYE_L', channel: 'ry', scale: -1, maxDegrees: 15 } ],

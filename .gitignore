@@ -2,5 +2,5 @@ node_modules
 dist
 .DS_Store
 
-# Large files hosted externally (GitHub Releases)
-public/characters/jonathan.glb.vite
+# Large uncompressed GLB (over 100MB - excluded from deployment)
+public/characters/jonathan.glb

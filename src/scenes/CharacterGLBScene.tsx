@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 
@@ -115,8 +116,15 @@ export default function CharacterGLBScene({
     controls.dampingFactor = 0.08;
     controls.rotateSpeed = 0.5;
 
-    // Load GLB
+    // Load GLB with Draco support
     const loader = new GLTFLoader();
+
+    // Set up Draco decoder for compressed GLB files
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    dracoLoader.setDecoderConfig({ type: 'js' });
+    loader.setDRACOLoader(dracoLoader);
+
     let model: THREE.Object3D | null = null;
     let raf = 0;
 
@@ -210,6 +218,7 @@ export default function CharacterGLBScene({
       if (model) scene.remove(model);
       controls.dispose();
       renderer.dispose();
+      dracoLoader.dispose();
       mount.removeChild(renderer.domElement);
     };
   }, [src, autoRotate, onReady, cameraOverride, skyboxUrl]);

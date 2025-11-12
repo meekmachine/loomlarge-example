@@ -40,6 +40,12 @@ export class EngineThree {
     from: number; to: number; start: number; dur: number; elapsed?: number;
     ease: (t:number)=>number
   }> = [];
+  // Track current eye and head positions for composite motion
+  private currentEyeYaw: number = 0;
+  private currentEyePitch: number = 0;
+  private currentHeadYaw: number = 0;
+  private currentHeadPitch: number = 0;
+  private currentHeadRoll: number = 0;
   private rafId: number | null = null;
   private now = () => (typeof performance!=='undefined' ? performance.now() : Date.now());
   private easeInOutQuad = (t:number) => (t<0.5? 2*t*t : -1+(4-2*t)*t);
@@ -95,6 +101,9 @@ export class EngineThree {
   }
   /** Smoothly tween an AU to a target value */
   transitionAU = (id: number|string, to: number, durationMs = 200) => {
+    // Cancel any existing transition for this AU to prevent conflicts
+    this.transitions = this.transitions.filter(t => !(t.kind === 'au' && t.id === id));
+
     const from = typeof id === 'string' ? (this.auValues[Number(id.replace(/[^\d]/g,''))] ?? 0) : (this.auValues[id] ?? 0);
     this.transitions.push({ kind:'au', id, from: clamp01(from), to: clamp01(to), start: this.now(), dur: durationMs, elapsed: 0, ease: this.easeInOutQuad });
     this.startRAF();
@@ -102,6 +111,9 @@ export class EngineThree {
 
   /** Smoothly tween a morph to a target value */
   transitionMorph = (key: string, to: number, durationMs = 120) => {
+    // Cancel any existing transition for this morph to prevent conflicts
+    this.transitions = this.transitions.filter(t => !(t.kind === 'morph' && t.key === key));
+
     const from = this.getMorphValue(key);
     this.transitions.push({ kind:'morph', id:key, key, from: clamp01(from), to: clamp01(to), start: this.now(), dur: durationMs, elapsed: 0, ease: this.easeInOutQuad });
     this.startRAF();
@@ -142,13 +154,9 @@ export class EngineThree {
 
   /** Re-evaluate and apply head/eye composites from current AU values (used after mix changes). */
   reapplyComposites = () => {
-    const yawHead   = (this.auValues[32] ?? 0) - (this.auValues[31] ?? 0);
-    const pitchHead = (this.auValues[33] ?? 0) - (this.auValues[54] ?? 0);
-    const rollHead  = (this.auValues[56] ?? 0) - (this.auValues[55] ?? 0);
-    const yawEye    = (this.auValues[62] ?? 0) - (this.auValues[61] ?? 0);
-    const pitchEye  = (this.auValues[63] ?? 0) - (this.auValues[64] ?? 0);
-    this.applyHeadComposite(yawHead, pitchHead, rollHead);
-    this.applyEyeComposite(yawEye, pitchEye);
+    // Use tracked state variables instead of auValues to preserve current positions
+    this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
+    this.applyEyeComposite(this.currentEyeYaw, this.currentEyePitch);
   };
 
   hasBoneBinding = (id: number) => {
@@ -278,15 +286,17 @@ export class EngineThree {
   /** Eyes — horizontal continuum: left(61) ⟷ right(62) */
   setEyesHorizontal = (v: number) => {
     const x = Math.max(-1, Math.min(1, v ?? 0));
-    // Use composite motion to update both bones and blendshapes
-    this.applyEyeComposite(x, 0);
+    this.currentEyeYaw = x;
+    // Use composite motion to update both bones and blendshapes, preserving vertical
+    this.applyEyeComposite(this.currentEyeYaw, this.currentEyePitch);
   };
 
   /** Eyes — vertical continuum: down(64) ⟷ up(63) — positive = up */
   setEyesVertical = (v: number) => {
     const y = Math.max(-1, Math.min(1, v ?? 0));
-    // Use composite motion to update both bones and blendshapes
-    this.applyEyeComposite(0, y);
+    this.currentEyePitch = y;
+    // Use composite motion to update both bones and blendshapes, preserving horizontal
+    this.applyEyeComposite(this.currentEyeYaw, this.currentEyePitch);
   };
 
   /** Left eye only — horizontal: 61L ⟷ 62L */
@@ -320,22 +330,25 @@ export class EngineThree {
   /** Head — horizontal continuum: left(31) ⟷ right(32) */
   setHeadHorizontal = (v: number) => {
     const x = Math.max(-1, Math.min(1, v ?? 0));
-    // Use composite motion to update both bones and blendshapes
-    this.applyHeadComposite(x, 0, 0);
+    this.currentHeadYaw = x;
+    // Use composite motion to update both bones and blendshapes, preserving other axes
+    this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
   };
 
   /** Head — vertical continuum: down(54) ⟷ up(33) — positive = up */
   setHeadVertical = (v: number) => {
     const y = Math.max(-1, Math.min(1, v ?? 0));
-    // Use composite motion to update both bones and blendshapes
-    this.applyHeadComposite(0, y, 0);
+    this.currentHeadPitch = y;
+    // Use composite motion to update both bones and blendshapes, preserving other axes
+    this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
   };
 
   /** Head — tilt/roll continuum: left(55) ⟷ right(56) — positive = right tilt */
   setHeadTilt = (v: number) => {
     const r = Math.max(-1, Math.min(1, v ?? 0));
-    // Use composite motion to update both bones and blendshapes
-    this.applyHeadComposite(0, 0, r);
+    this.currentHeadRoll = r;
+    // Use composite motion to update both bones and blendshapes, preserving other axes
+    this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
   };
 
   /** Alias for setHeadTilt for consistency with BoneControls naming */

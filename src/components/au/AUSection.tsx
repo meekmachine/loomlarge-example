@@ -81,12 +81,17 @@ export default function AUSection({
               const isHeadVertical = pair.negative.id === '54' && pair.positive.id === '33';
               const isHeadTilt = pair.negative.id === '55' && pair.positive.id === '56';
 
+              // Show blend slider for eyes and head continua
+              const showBlend = isEyesHorizontal || isEyesVertical || isHeadHorizontal || isHeadVertical || isHeadTilt;
+
               return (
                 <Box key={`${pair.negative.id}-${pair.positive.id}`} w="100%">
                   <ContinuumSlider
                     negativeAU={pair.negative}
                     positiveAU={pair.positive}
                     value={continuumValue}
+                    engine={engine}
+                    showBlendSlider={showBlend}
                     onChange={(val) => {
                       // Update local state
                       if (val >= 0) {
