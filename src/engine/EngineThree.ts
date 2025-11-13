@@ -307,6 +307,9 @@ export class EngineThree {
 
   applyMorphs = (keys: string[], v: number) => {
     const val = clamp01(v);
+    const foundMorphs: string[] = [];
+    const notFoundMorphs: string[] = [];
+
     for (const m of this.meshes) {
       const name = (m.name || '').toLowerCase();
       if (name.includes('occlusion') || name.includes('tearline')) continue;
@@ -315,12 +318,32 @@ export class EngineThree {
       if (!dict || !infl) continue;
       for (const k of keys) {
         let idx = dict[k];
+        let foundKey = k;
         if (idx === undefined && MORPH_VARIANTS[k]) {
           for (const alt of MORPH_VARIANTS[k]) {
-            if (dict[alt] !== undefined) { idx = dict[alt]; break; }
+            if (dict[alt] !== undefined) {
+              idx = dict[alt];
+              foundKey = alt;
+              break;
+            }
           }
         }
-        if (idx !== undefined) infl[idx] = val;
+        if (idx !== undefined) {
+          infl[idx] = val;
+          if (!foundMorphs.includes(foundKey)) foundMorphs.push(foundKey);
+        } else {
+          if (!notFoundMorphs.includes(k)) notFoundMorphs.push(k);
+        }
+      }
+    }
+
+    // Debug logging for jaw morphs
+    if (keys.some(k => /jaw|mouth/i.test(k))) {
+      if (foundMorphs.length) {
+        console.log(`[EngineThree] applyMorphs: Applied value=${val.toFixed(2)} to morphs:`, foundMorphs);
+      }
+      if (notFoundMorphs.length) {
+        console.warn(`[EngineThree] applyMorphs: NOT FOUND morphs:`, notFoundMorphs);
       }
     }
   };
@@ -658,9 +681,18 @@ export class EngineThree {
     const globalAUs = new Set([31, 32, 33, 54, 61, 62, 63, 64]);
     const keys = AU_TO_MORPHS[id] || [];
 
+    // Debug jaw morphs
+    if (id === 25 || id === 26 || id === 27) {
+      console.log(`[EngineThree] applyBothSides AU${id} value=${v.toFixed(2)}, keys:`, keys);
+    }
+
     // For mixed AUs (both morph and bone), scale morph intensity by mix weight
     const mixWeight = MIXED_AUS.has(id) ? this.getAUMixWeight(id) : 1.0;
     const morphValue = v * mixWeight;
+
+    if (id === 25 || id === 26 || id === 27) {
+      console.log(`[EngineThree] mixWeight=${mixWeight.toFixed(2)}, morphValue=${morphValue.toFixed(2)}`);
+    }
 
     if (globalAUs.has(id)) {
       this.applyMorphs(keys, morphValue);
@@ -718,19 +750,6 @@ export class EngineThree {
 
       // Apply the binding
       this.applySingleBinding(entry, { ...binding, maxDegrees: b.maxDegrees, maxUnits: b.maxUnits, scale: b.scale }, val);
-
-      // Blend a portion into neck for rigs that weight head motion to neck twist bones
-      if ((id >= 31 && id <= 33) || (id >= 51 && id <= 58)) {
-        if (bones.NECK) {
-          const neckEntry = bones.NECK as NodeBase;
-          this.applySingleBinding(neckEntry, { ...binding, node: 'NECK' as const }, val * 0.4);
-        }
-        // Secondary neck twist support if present
-        const neck2 = (bones as any).NECK2 as NodeBase;
-        if (neck2) {
-          this.applySingleBinding(neck2, { ...binding, node: 'NECK2' as const }, val * 0.25);
-        }
-      }
     }
 
     this.model.updateMatrixWorld(true);
