@@ -14,7 +14,9 @@ import {
   HEAD_CTRL_CANDIDATES,
   BONE_DRIVEN_AUS,
   EYE_AXIS,
-  MIXED_AUS
+  MIXED_AUS,
+  AU_TO_COMPOSITE_MAP,
+  COMPOSITE_ROTATIONS
 } from './arkit/shapeDict';
 
 const X_AXIS = new THREE.Vector3(1,0,0);
@@ -40,7 +42,17 @@ export class EngineThree {
     from: number; to: number; elapsed: number; dur: number;
     ease: (t:number)=>number
   }> = [];
-  // Track current eye and head positions for composite motion
+
+  // Unified rotation state tracking for composite bones
+  // Each bone maintains its complete 3D rotation (pitch/yaw/roll) to prevent overwriting
+  private boneRotations = {
+    JAW: { pitch: 0, yaw: 0, roll: 0 },
+    HEAD: { pitch: 0, yaw: 0, roll: 0 },
+    EYE_L: { pitch: 0, yaw: 0, roll: 0 },
+    EYE_R: { pitch: 0, yaw: 0, roll: 0 }
+  };
+
+  // Track current eye and head positions for composite motion (legacy - will be replaced by boneRotations)
   private currentEyeYaw: number = 0;
   private currentEyePitch: number = 0;
   private currentHeadYaw: number = 0;
@@ -253,28 +265,52 @@ export class EngineThree {
 
     this.auValues[id] = v;
 
-    // Apply non-head/eye AUs directly to both morphs and bones.
-    const isHeadOrEye =
-      id === 31 || id === 32 || id === 33 || id === 54 || id === 55 || id === 56 ||
-      id === 61 || id === 62 || id === 63 || id === 64;
-    if (!isHeadOrEye) {
-      // Morphs: map AU to morphs; handle L/R variants if present.
+    // Check if this AU is part of a composite rotation system
+    const compositeInfo = AU_TO_COMPOSITE_MAP.get(id);
+
+    if (compositeInfo) {
+      // This AU affects composite bone rotations (jaw, head, eyes)
+      // Always apply morphs first
       this.applyBothSides(id, v);
-      // Bones: if bindings exist for this AU, apply them.
+
+      // Update rotation state for each affected node
+      for (const nodeKey of compositeInfo.nodes) {
+        // Determine the value for this axis based on the continuum
+        const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
+        if (!config) continue;
+
+        const axisConfig = config[compositeInfo.axis];
+        if (!axisConfig) continue;
+
+        // Calculate axis value based on whether it's a continuum or multi-AU axis
+        let axisValue = 0;
+        if (axisConfig.negative !== undefined && axisConfig.positive !== undefined) {
+          // Continuum: calculate difference between positive and negative AUs
+          const negValue = this.auValues[axisConfig.negative] ?? 0;
+          const posValue = this.auValues[axisConfig.positive] ?? 0;
+          axisValue = posValue - negValue;
+        } else if (axisConfig.aus.length > 1) {
+          // Multiple AUs affect same axis (e.g., jaw drop has AU 25, 26, 27)
+          // Use the maximum value among all AUs for this axis
+          axisValue = Math.max(...axisConfig.aus.map(auId => this.auValues[auId] ?? 0));
+        } else {
+          // Single AU controls this axis
+          axisValue = v;
+        }
+
+        // Update the rotation state for this axis
+        this.updateBoneRotation(nodeKey, compositeInfo.axis, axisValue);
+
+        // Apply the complete composite rotation
+        this.applyCompositeRotation(nodeKey);
+      }
+    } else {
+      // Non-composite AU: apply directly to both morphs and bones
+      this.applyBothSides(id, v);
       if (this.hasBoneBinding(id)) {
         this.applyBones(id, v);
       }
     }
-
-    // Handle composites for head and eyes
-    const yawHead   = (this.auValues[32] ?? 0) - (this.auValues[31] ?? 0);
-    const pitchHead = (this.auValues[33] ?? 0) - (this.auValues[54] ?? 0);
-    const rollHead  = (this.auValues[56] ?? 0) - (this.auValues[55] ?? 0);
-    const yawEye    = (this.auValues[62] ?? 0) - (this.auValues[61] ?? 0);
-    const pitchEye  = (this.auValues[63] ?? 0) - (this.auValues[64] ?? 0);
-
-    this.applyHeadComposite(yawHead, pitchHead, rollHead);
-    this.applyEyeComposite(yawEye, pitchEye);
   };
 
   /** --- High-level continuum helpers (UI-agnostic) ---
@@ -353,6 +389,24 @@ export class EngineThree {
   /** Alias for setHeadTilt for consistency with BoneControls naming */
   setHeadRoll = (v: number) => {
     this.setHeadTilt(v);
+  };
+
+  /** Jaw — horizontal continuum: left(30) ⟷ right(35) */
+  setJawHorizontal = (v: number) => {
+    const x = Math.max(-1, Math.min(1, v ?? 0));
+    // Update yaw rotation state and apply composite
+    this.updateBoneRotation('JAW', 'yaw', x);
+    this.applyCompositeRotation('JAW');
+    // Also update AU values for UI sync
+    if (x >= 0) {
+      this.auValues[35] = x;
+      this.auValues[30] = 0;
+    } else {
+      this.auValues[30] = -x;
+      this.auValues[35] = 0;
+    }
+    // Apply morphs
+    this.applyBothSides(x >= 0 ? 35 : 30, Math.abs(x));
   };
 
   /** Unified composite handler for head and eyes with full pitch/yaw combination (+optional tilt/roll) */
@@ -517,6 +571,7 @@ export class EngineThree {
     // Eyes turn should use rz (horizontal yaw) and rx (vertical pitch)
     this.applyCompositeMotion(61, 63, yaw, pitch, 64);
   }
+
   // Handles bidirectional morph logic for eyes and head
   private applyDirectionalMorphs(id: number, value: number) {
     const absVal = Math.abs(value);
@@ -569,6 +624,95 @@ export class EngineThree {
       }
     }
   };
+
+  /**
+   * Update rotation state for a specific axis of a composite bone.
+   * This allows independent control of pitch/yaw/roll without overwriting.
+   */
+  private updateBoneRotation(
+    nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R',
+    axis: 'pitch' | 'yaw' | 'roll',
+    value: number
+  ) {
+    this.boneRotations[nodeKey][axis] = Math.max(-1, Math.min(1, value));
+  }
+
+  /**
+   * Apply the complete composite rotation for a bone.
+   * Combines pitch/yaw/roll from rotation state into a single quaternion.
+   */
+  private applyCompositeRotation(nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R') {
+    const bones = this.bones;
+    const entry = bones[nodeKey];
+    if (!entry || !this.model) return;
+
+    const { obj, basePos, baseQuat } = entry;
+    const rotState = this.boneRotations[nodeKey];
+
+    // Find the composite rotation config for this node
+    const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
+    if (!config) return;
+
+    // Helper to get binding from the most active AU for an axis
+    const getBindingForAxis = (axisConfig: typeof config.pitch | typeof config.yaw | typeof config.roll) => {
+      if (!axisConfig) return null;
+
+      // If multiple AUs, find which one is active (has highest value)
+      if (axisConfig.aus.length > 1) {
+        let maxAU = axisConfig.aus[0];
+        let maxValue = this.auValues[maxAU] ?? 0;
+        for (const auId of axisConfig.aus) {
+          const val = this.auValues[auId] ?? 0;
+          if (val > maxValue) {
+            maxValue = val;
+            maxAU = auId;
+          }
+        }
+        return BONE_AU_TO_BINDINGS[maxAU]?.[0];
+      }
+
+      // Single AU or continuum pair - use first AU
+      return BONE_AU_TO_BINDINGS[axisConfig.aus[0]]?.[0];
+    };
+
+    // Build composite quaternion from individual axes
+    const compositeQ = new THREE.Quaternion().copy(baseQuat);
+
+    // Apply rotations in order: yaw (Y), pitch (X), roll (Z) - standard Euler order
+    if (config.yaw && rotState.yaw !== 0) {
+      const binding = getBindingForAxis(config.yaw);
+      if (binding?.maxDegrees) {
+        const radians = deg2rad(binding.maxDegrees) * rotState.yaw * binding.scale;
+        const deltaQ = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, radians);
+        compositeQ.multiply(deltaQ);
+      }
+    }
+
+    if (config.pitch && rotState.pitch !== 0) {
+      const binding = getBindingForAxis(config.pitch);
+      if (binding?.maxDegrees) {
+        const radians = deg2rad(binding.maxDegrees) * rotState.pitch * binding.scale;
+        const axis = config.pitch.axis === 'rx' ? X_AXIS : config.pitch.axis === 'ry' ? Y_AXIS : Z_AXIS;
+        const deltaQ = new THREE.Quaternion().setFromAxisAngle(axis, radians);
+        compositeQ.multiply(deltaQ);
+      }
+    }
+
+    if (config.roll && rotState.roll !== 0) {
+      const binding = getBindingForAxis(config.roll);
+      if (binding?.maxDegrees) {
+        const radians = deg2rad(binding.maxDegrees) * rotState.roll * binding.scale;
+        const deltaQ = new THREE.Quaternion().setFromAxisAngle(Z_AXIS, radians);
+        compositeQ.multiply(deltaQ);
+      }
+    }
+
+    // Apply composite rotation
+    obj.position.copy(basePos);
+    obj.quaternion.copy(compositeQ);
+    obj.updateMatrixWorld(false);
+    this.model.updateMatrixWorld(true);
+  }
 
   private applyBones = (id: number, v: number) => {
     const bindings = BONE_AU_TO_BINDINGS[id];

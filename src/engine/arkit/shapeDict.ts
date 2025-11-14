@@ -233,7 +233,7 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
     { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 18.25 }, // 73% of 25
   ],
   29: [
-    { node: 'JAW', channel: 'tz', scale: 1, maxUnits: 0.01 },
+    { node: 'JAW', channel: 'tz', scale: -1, maxUnits: 0.02 },  // Negative for forward thrust
   ],
   30: [ // Jaw Left
     { node: 'JAW', channel: 'ry', scale: -1, maxDegrees: 5 },
@@ -247,6 +247,80 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
     { node: 'TONGUE', channel: 'tz', scale: -1, maxUnits: 0.008 },
   ],
 };
+
+/**
+ * COMPOSITE_ROTATIONS - Defines unified rotation axes for bones that need
+ * pitch/yaw/roll tracked together to prevent overwriting.
+ *
+ * Each composite bone tracks its complete 3D rotation state. When an AU is set,
+ * only its specific axis is updated, then the complete rotation is applied.
+ */
+export interface RotationAxis {
+  aus: number[];       // AUs that affect this axis
+  axis: 'rx' | 'ry' | 'rz';  // Physical rotation axis
+  negative?: number;   // AU for negative direction (if continuum)
+  positive?: number;   // AU for positive direction (if continuum)
+}
+
+export interface CompositeRotation {
+  node: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R';
+  pitch: RotationAxis | null;  // Up/down rotation (typically rx or rz)
+  yaw: RotationAxis | null;    // Left/right rotation (typically ry)
+  roll: RotationAxis | null;   // Tilt rotation (typically rz)
+}
+
+export const COMPOSITE_ROTATIONS: CompositeRotation[] = [
+  {
+    node: 'JAW',
+    pitch: { aus: [25, 26, 27], axis: 'rz' },  // Jaw drop (opens mouth downward)
+    yaw: { aus: [30, 35], axis: 'ry', negative: 30, positive: 35 },  // Jaw lateral (left/right)
+    roll: null  // Jaw doesn't have roll
+  },
+  {
+    node: 'HEAD',
+    pitch: { aus: [54, 33], axis: 'rx', negative: 54, positive: 33 },  // Head down/up
+    yaw: { aus: [31, 32], axis: 'ry', negative: 31, positive: 32 },  // Head turn left/right
+    roll: { aus: [55, 56], axis: 'rz', negative: 55, positive: 56 }   // Head tilt left/right
+  },
+  {
+    node: 'EYE_L',
+    pitch: { aus: [64, 63], axis: 'rx', negative: 64, positive: 63 },  // Eyes down/up
+    yaw: { aus: [61, 62], axis: 'ry', negative: 61, positive: 62 },    // Eyes left/right
+    roll: null  // Eyes don't have roll
+  },
+  {
+    node: 'EYE_R',
+    pitch: { aus: [64, 63], axis: 'rx', negative: 64, positive: 63 },  // Eyes down/up
+    yaw: { aus: [61, 62], axis: 'ry', negative: 61, positive: 62 },    // Eyes left/right
+    roll: null  // Eyes don't have roll
+  }
+];
+
+/**
+ * Map AU ID to which composite rotation it belongs to, and which axis.
+ * This allows quick lookup when setAU is called.
+ */
+export const AU_TO_COMPOSITE_MAP = new Map<number, {
+  nodes: ('JAW' | 'HEAD' | 'EYE_L' | 'EYE_R')[];
+  axis: 'pitch' | 'yaw' | 'roll';
+}>();
+
+// Build the reverse mapping
+COMPOSITE_ROTATIONS.forEach(comp => {
+  (['pitch', 'yaw', 'roll'] as const).forEach(axisName => {
+    const axis = comp[axisName];
+    if (axis) {
+      axis.aus.forEach(auId => {
+        const existing = AU_TO_COMPOSITE_MAP.get(auId);
+        if (existing) {
+          existing.nodes.push(comp.node);
+        } else {
+          AU_TO_COMPOSITE_MAP.set(auId, { nodes: [comp.node], axis: axisName });
+        }
+      });
+    }
+  });
+});
 
 // Candidate node names to resolve placeholders per-side on common CC/GLB exports.
 export const EYE_BONE_CANDIDATES_LEFT:  string[] = [

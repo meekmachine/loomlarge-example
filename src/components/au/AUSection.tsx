@@ -131,18 +131,7 @@ export default function AUSection({
                     } else if (isHeadTilt) {
                       engine?.setHeadTilt(val);
                     } else if (isJawHorizontal) {
-                      const mixWeight = engine?.getAUMixWeight(30) ?? 1.0;
-                      const morphWeight = 1.0 - mixWeight;
-
-                      if (val >= 0) {
-                        engine?.setMorph('Jaw_R', val * morphWeight);
-                        engine?.setMorph('Jaw_L', 0);
-                        engine?.setAU(35, val);
-                      } else {
-                        engine?.setMorph('Jaw_L', -val * morphWeight);
-                        engine?.setMorph('Jaw_R', 0);
-                        engine?.setAU(30, -val);
-                      }
+                      engine?.setJawHorizontal(val);
                     }
                   }}
                 />
