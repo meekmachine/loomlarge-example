@@ -30,6 +30,8 @@ export class LipSyncService {
       onsetIntensity: config.onsetIntensity ?? 90,
       holdMs: config.holdMs ?? 140,
       speechRate: config.speechRate ?? 1.0,
+      jawActivation: config.jawActivation ?? 1.0,
+      lipsyncIntensity: config.lipsyncIntensity ?? 1.0,
     };
 
     this.callbacks = callbacks;
@@ -245,6 +247,13 @@ export class LipSyncService {
    */
   public getState(): LipSyncState {
     return { ...this.state };
+  }
+
+  /**
+   * Get current config
+   */
+  public getConfig(): Required<LipSyncConfig> {
+    return { ...this.config };
   }
 
   /**

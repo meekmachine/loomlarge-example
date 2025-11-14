@@ -14,4 +14,5 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
   position: fixed; /* ensure it fills viewport regardless of layout */
   inset: 0;
   background: #0b0b0c;
+  z-index: 0; /* Keep scene behind UI elements */
 }

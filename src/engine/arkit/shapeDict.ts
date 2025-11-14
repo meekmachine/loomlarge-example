@@ -40,6 +40,10 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
   // Tongue
   19: ['Tongue_Out'],
   36: ['Tongue_Bulge_L','Tongue_Bulge_R'],
+  37: [],  // Tongue Up - BONE ONLY
+  38: [],  // Tongue Down - BONE ONLY
+  39: [],  // Tongue Left - BONE ONLY
+  40: [],  // Tongue Right - BONE ONLY
 
   // Jaw / Head (convenience)
   29: ['Jaw_Forward'],
@@ -246,6 +250,18 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
   19: [
     { node: 'TONGUE', channel: 'tz', scale: -1, maxUnits: 0.008 },
   ],
+  37: [ // Tongue Up
+    { node: 'TONGUE', channel: 'rx', scale: -1, maxDegrees: 15 },
+  ],
+  38: [ // Tongue Down
+    { node: 'TONGUE', channel: 'rx', scale: 1, maxDegrees: 15 },
+  ],
+  39: [ // Tongue Left
+    { node: 'TONGUE', channel: 'ry', scale: -1, maxDegrees: 10 },
+  ],
+  40: [ // Tongue Right
+    { node: 'TONGUE', channel: 'ry', scale: 1, maxDegrees: 10 },
+  ],
 };
 
 /**
@@ -263,7 +279,7 @@ export interface RotationAxis {
 }
 
 export interface CompositeRotation {
-  node: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R';
+  node: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE';
   pitch: RotationAxis | null;  // Up/down rotation (typically rx or rz)
   yaw: RotationAxis | null;    // Left/right rotation (typically ry)
   roll: RotationAxis | null;   // Tilt rotation (typically rz)
@@ -293,6 +309,12 @@ export const COMPOSITE_ROTATIONS: CompositeRotation[] = [
     pitch: { aus: [64, 63], axis: 'rx', negative: 64, positive: 63 },  // Eyes down/up
     yaw: { aus: [61, 62], axis: 'ry', negative: 61, positive: 62 },    // Eyes left/right
     roll: null  // Eyes don't have roll
+  },
+  {
+    node: 'TONGUE',
+    pitch: { aus: [38, 37], axis: 'rx', negative: 38, positive: 37 },  // Tongue down/up
+    yaw: { aus: [39, 40], axis: 'ry', negative: 39, positive: 40 },    // Tongue left/right
+    roll: null  // Tongue doesn't have roll
   }
 ];
 
@@ -301,7 +323,7 @@ export const COMPOSITE_ROTATIONS: CompositeRotation[] = [
  * This allows quick lookup when setAU is called.
  */
 export const AU_TO_COMPOSITE_MAP = new Map<number, {
-  nodes: ('JAW' | 'HEAD' | 'EYE_L' | 'EYE_R')[];
+  nodes: ('JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE')[];
   axis: 'pitch' | 'yaw' | 'roll';
 }>();
 
@@ -394,6 +416,10 @@ export const AU_INFO: Record<string, AUInfo> = {
   // Tongue (Lower)
   '19': { id:'19', name:'Tongue Show',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
   '36': { id:'36', name:'Tongue Bulge',      faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '37': { id:'37', name:'Tongue Up',         faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '38': { id:'38', name:'Tongue Down',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '39': { id:'39', name:'Tongue Left',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '40': { id:'40', name:'Tongue Right',      faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
 
   // Jaw (Lower)
   '26': { id:'26', name:'Jaw Drop',          muscularBasis:'masseter (relax temporalis)', links:['https://en.wikipedia.org/wiki/Masseter_muscle'], faceArea:'Lower', facePart:'Jaw', faceSection:'Jaw' },
@@ -419,7 +445,8 @@ export const AU_INFO: Record<string, AUInfo> = {
 export const BONE_DRIVEN_AUS = new Set([
   31, 32, 33, 54, 55, 56, // head turn/tilt (left, right, up, down, tilt left, tilt right)
   61, 62, 63, 64, // eyes (left, right, up, down)
-  25, 26, 27, 29, 30, 35 // jaw (lips part, jaw drop, mouth stretch, jaw forward, jaw left, jaw right)
+  25, 26, 27, 29, 30, 35, // jaw (lips part, jaw drop, mouth stretch, jaw forward, jaw left, jaw right)
+  19, 37, 38, 39, 40 // tongue (show, up, down, left, right)
 ]);
 
 /**
@@ -458,6 +485,14 @@ export const HEAD_TILT_AXIS = { left: 55, right: 56 };
 export const JAW_HORIZONTAL_AXIS = { left: 30, right: 35 };
 
 /**
+ * Tongue combined axes for continuous bidirectional control.
+ */
+export const TONGUE_COMBINED_AXES = {
+  horizontal: { left: 39, right: 40 },
+  vertical: { down: 38, up: 37 },
+};
+
+/**
  * All continuum pairs for bidirectional sliders.
  * Each pair specifies the negative (left/down) and positive (right/up) AU IDs.
  */
@@ -473,6 +508,10 @@ export const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBl
 
   // Jaw
   { negative: 30, positive: 35, showBlend: true },  // Jaw Left ↔ Right
+
+  // Tongue
+  { negative: 38, positive: 37, showBlend: true },  // Tongue Down ↔ Up
+  { negative: 39, positive: 40, showBlend: true },  // Tongue Left ↔ Right
 ];
 
 /**

@@ -67,7 +67,13 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
   const lipSyncRef = useRef<LipSyncService | null>(null);
   const wordIndexRef = useRef(0);
   const currentVisemeSnippetRef = useRef<string | null>(null);
+  const currentJawSnippetRef = useRef<string | null>(null);
   const browSnippetRef = useRef<string | null>(null);
+
+  // Accumulate viseme curves across all words for single snippet
+  const accumulatedVisemeCurves = useRef<Record<string, Array<{ time: number; intensity: number }>>>({});
+  const accumulatedJawCurves = useRef<Record<string, Array<{ time: number; intensity: number }>>>({});
+  const cumulativeTimeOffset = useRef(0);
 
   // Initialize services
   useEffect(() => {
@@ -102,6 +108,20 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           setStatus('speaking');
           wordIndexRef.current = 0;
 
+          // Reset accumulation for new speech
+          accumulatedVisemeCurves.current = {};
+          accumulatedJawCurves.current = {};
+          cumulativeTimeOffset.current = 0;
+
+          // Create initial viseme snippet that will be updated with curves
+          const visemeSnippetName = `lipsync_viseme_${Date.now()}`;
+          const jawSnippetName = `lipsync_jaw_${Date.now()}`;
+
+          currentVisemeSnippetRef.current = visemeSnippetName;
+          currentJawSnippetRef.current = jawSnippetName;
+
+          console.log('[TTS] Created snippet names:', { visemeSnippetName, jawSnippetName });
+
           // Start animation playback
           anim.play();
         },
@@ -110,17 +130,14 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           setIsSpeaking(false);
           setStatus('idle');
 
-          // Remove ALL viseme and jaw snippets from animation service
+          // Remove the lip-sync snippets from animation service
           if (anim) {
-            const state = anim.getState?.();
-            const animations = (state?.context?.animations as any[]) || [];
-
-            // Find and remove all viseme and jaw snippets
-            animations.forEach(snippet => {
-              if (snippet.name?.startsWith('viseme_') || snippet.name?.startsWith('jaw_')) {
-                anim.remove(snippet.name);
-              }
-            });
+            if (currentVisemeSnippetRef.current) {
+              anim.remove(currentVisemeSnippetRef.current);
+            }
+            if (currentJawSnippetRef.current) {
+              anim.remove(currentJawSnippetRef.current);
+            }
 
             // Schedule a final neutral snippet to return ALL visemes and jaw to zero
             const neutralSnippet = `neutral_${Date.now()}`;
@@ -158,6 +175,7 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           }
 
           currentVisemeSnippetRef.current = null;
+          currentJawSnippetRef.current = null;
 
           // Remove brow snippet
           if (browSnippetRef.current) {
@@ -169,26 +187,21 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           console.log(`[TTS] Word boundary: "${word}" at ${charIndex}`);
 
           // Extract visemes for this word using phoneme extraction
-          if (lipSyncRef.current && word && anim) {
+          if (lipSyncRef.current && word && anim && currentVisemeSnippetRef.current) {
             const visemeTimeline = lipSyncRef.current.extractVisemeTimeline(word);
             console.log(`[TTS] Extracted ${visemeTimeline.length} visemes for "${word}":`, visemeTimeline);
 
-            // Build viseme snippet with curves for animation service
-            const visemeCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
-
-            // Track jaw movements in separate curves object for AU snippet
-            const jawCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
-
-            // Add viseme keyframes to curves with smooth transitions
+            // Add viseme keyframes to accumulated curves with cumulative time offset
             visemeTimeline.forEach((visemeEvent, idx) => {
               // Convert SAPI viseme ID to ARKit viseme index (0-14) for proper morph mapping
               const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
               const visemeId = arkitIndex.toString();
-              const timeInSec = visemeEvent.offsetMs / 1000;
+              const timeInSec = (visemeEvent.offsetMs / 1000) + cumulativeTimeOffset.current;
               const durationInSec = visemeEvent.durationMs / 1000;
 
-              if (!visemeCurves[visemeId]) {
-                visemeCurves[visemeId] = [];
+              // Initialize curve array if needed
+              if (!accumulatedVisemeCurves.current[visemeId]) {
+                accumulatedVisemeCurves.current[visemeId] = [];
               }
 
               // Snappy transitions - each viseme activates fully then returns to zero
@@ -196,26 +209,25 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
               const peakTime = durationInSec * 0.65;
 
               // Start at zero
-              visemeCurves[visemeId].push({
+              accumulatedVisemeCurves.current[visemeId].push({
                 time: timeInSec,
                 intensity: 0,
               });
 
               // Reach peak quickly (apply lipsync intensity multiplier)
-              visemeCurves[visemeId].push({
+              accumulatedVisemeCurves.current[visemeId].push({
                 time: timeInSec + anticipationTime,
                 intensity: 100 * lipsyncIntensity,
               });
 
               // Hold at peak (apply lipsync intensity multiplier)
-              visemeCurves[visemeId].push({
+              accumulatedVisemeCurves.current[visemeId].push({
                 time: timeInSec + peakTime,
                 intensity: 100 * lipsyncIntensity,
               });
 
               // Return to zero - ALWAYS go to zero for clean transitions
-              // This ensures each viseme is discrete and doesn't blend with others
-              visemeCurves[visemeId].push({
+              accumulatedVisemeCurves.current[visemeId].push({
                 time: timeInSec + durationInSec,
                 intensity: 0,
               });
@@ -224,80 +236,48 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
               const jawAmount = getJawAmountForViseme(visemeEvent.visemeId);
               if (jawAmount > 0) {
                 // Initialize jaw curve if needed
-                if (!jawCurves['26']) {
-                  jawCurves['26'] = [];
+                if (!accumulatedJawCurves.current['26']) {
+                  accumulatedJawCurves.current['26'] = [];
                 }
 
                 // Jaw opening
-                jawCurves['26'].push({
+                accumulatedJawCurves.current['26'].push({
                   time: timeInSec,
                   intensity: 0,
                 });
 
-                jawCurves['26'].push({
+                accumulatedJawCurves.current['26'].push({
                   time: timeInSec + anticipationTime,
                   intensity: jawAmount * 100 * jawActivation,
                 });
 
-                jawCurves['26'].push({
+                accumulatedJawCurves.current['26'].push({
                   time: timeInSec + peakTime,
                   intensity: jawAmount * 100 * jawActivation,
                 });
 
                 // Jaw closing - ALWAYS return to zero for clean transitions
-                jawCurves['26'].push({
+                accumulatedJawCurves.current['26'].push({
                   time: timeInSec + durationInSec,
                   intensity: 0,
                 });
               }
             });
 
-            // Calculate max time and add neutral hold period
-            const lastVisemeEndTime = visemeTimeline.length > 0
-              ? Math.max(...visemeTimeline.map(v => (v.offsetMs + v.durationMs) / 1000))
-              : 0;
-
-            // Add 100ms neutral hold AFTER the last viseme to ensure mouth closes
-            const neutralHoldDuration = 0.1; // 100ms
-            const maxTime = lastVisemeEndTime + neutralHoldDuration;
-
-            // Add explicit neutral keyframes for ALL viseme curves at the end
-            Object.keys(visemeCurves).forEach(curveId => {
-              const curve = visemeCurves[curveId];
-              // Ensure the curve ends at zero and stays there
-              if (curve.length > 0) {
-                const lastKeyframe = curve[curve.length - 1];
-                // If last keyframe isn't already at maxTime, add a hold at zero
-                if (lastKeyframe.time < maxTime) {
-                  curve.push({
-                    time: maxTime,
-                    intensity: 0,
-                  });
-                }
-              }
-            });
-
-            // Ensure jaw also returns to neutral and holds
-            if (jawCurves['26'] && jawCurves['26'].length > 0) {
-              const jawCurve = jawCurves['26'];
-              const lastJawKeyframe = jawCurve[jawCurve.length - 1];
-              if (lastJawKeyframe.time < maxTime) {
-                jawCurve.push({
-                  time: maxTime,
-                  intensity: 0,
-                });
-              }
+            // Update cumulative time offset for next word
+            if (visemeTimeline.length > 0) {
+              const lastVisemeEndTime = Math.max(...visemeTimeline.map(v => (v.offsetMs + v.durationMs) / 1000));
+              cumulativeTimeOffset.current += lastVisemeEndTime + 0.05; // Add 50ms gap between words
             }
 
-            // DON'T remove previous snippet - let them blend together naturally
-            // Each word snippet will overlap and the animation service will blend them
+            // Calculate total max time with neutral hold
+            const totalMaxTime = cumulativeTimeOffset.current + 0.1; // 100ms neutral hold at end
 
-            // Schedule viseme snippet (for mouth shapes)
-            const visemeSnippetName = `viseme_${Date.now()}`;
+            // Update/schedule the viseme snippet with accumulated curves
             anim.schedule({
-              name: visemeSnippetName,
-              curves: visemeCurves,
-              maxTime,
+              name: currentVisemeSnippetRef.current,
+              curves: accumulatedVisemeCurves.current,
+              maxTime: totalMaxTime,
               loop: false,
               snippetCategory: 'visemeSnippet', // This tells scheduler to map indices to VISEME_KEYS
               snippetPriority: 50, // Higher priority for lip sync
@@ -305,13 +285,12 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
               snippetIntensityScale: 1.0,
             });
 
-            // Schedule jaw snippet separately (as AU snippet, not viseme)
-            if (Object.keys(jawCurves).length > 0) {
-              const jawSnippetName = `jaw_${Date.now()}`;
+            // Update/schedule jaw snippet with accumulated curves
+            if (currentJawSnippetRef.current && Object.keys(accumulatedJawCurves.current).length > 0) {
               anim.schedule({
-                name: jawSnippetName,
-                curves: jawCurves,
-                maxTime,
+                name: currentJawSnippetRef.current,
+                curves: accumulatedJawCurves.current,
+                maxTime: totalMaxTime,
                 loop: false,
                 snippetCategory: 'auSnippet', // This tells scheduler to apply as AU IDs
                 snippetPriority: 50, // Same priority as visemes
@@ -319,10 +298,6 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
                 snippetIntensityScale: 1.0,
               });
             }
-
-            // Store snippet name but don't remove old ones during speech
-            // They'll auto-remove when they finish playing
-            currentVisemeSnippetRef.current = visemeSnippetName;
 
             // Schedule brow raise every few words for prosodic emphasis
             if (wordIndexRef.current % 3 === 0 && anim) {
@@ -391,6 +366,9 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
       if (currentVisemeSnippetRef.current) {
         anim.remove(currentVisemeSnippetRef.current);
       }
+      if (currentJawSnippetRef.current) {
+        anim.remove(currentJawSnippetRef.current);
+      }
       if (browSnippetRef.current) {
         anim.remove(browSnippetRef.current);
       }
@@ -436,17 +414,14 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
     setIsSpeaking(false);
     setStatus('idle');
 
-    // Remove ALL viseme and jaw snippets from animation service
+    // Remove the lip-sync snippets from animation service
     if (anim) {
-      const state = anim.getState?.();
-      const animations = (state?.context?.animations as any[]) || [];
-
-      // Find and remove all viseme and jaw snippets
-      animations.forEach(snippet => {
-        if (snippet.name?.startsWith('viseme_') || snippet.name?.startsWith('jaw_')) {
-          anim.remove(snippet.name);
-        }
-      });
+      if (currentVisemeSnippetRef.current) {
+        anim.remove(currentVisemeSnippetRef.current);
+      }
+      if (currentJawSnippetRef.current) {
+        anim.remove(currentJawSnippetRef.current);
+      }
 
       // Schedule a final neutral snippet to return ALL visemes and jaw to zero
       const neutralSnippet = `neutral_stop_${Date.now()}`;
@@ -484,6 +459,7 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
     }
 
     currentVisemeSnippetRef.current = null;
+    currentJawSnippetRef.current = null;
 
     // Remove brow snippet
     if (browSnippetRef.current) {

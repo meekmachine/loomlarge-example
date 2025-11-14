@@ -49,7 +49,8 @@ export class EngineThree {
     JAW: { pitch: 0, yaw: 0, roll: 0 },
     HEAD: { pitch: 0, yaw: 0, roll: 0 },
     EYE_L: { pitch: 0, yaw: 0, roll: 0 },
-    EYE_R: { pitch: 0, yaw: 0, roll: 0 }
+    EYE_R: { pitch: 0, yaw: 0, roll: 0 },
+    TONGUE: { pitch: 0, yaw: 0, roll: 0 }
   };
 
   // Track current eye and head positions for composite motion (legacy - will be replaced by boneRotations)
@@ -409,6 +410,42 @@ export class EngineThree {
     this.applyBothSides(x >= 0 ? 35 : 30, Math.abs(x));
   };
 
+  /** Tongue — horizontal continuum: left(39) ⟷ right(40) */
+  setTongueHorizontal = (v: number) => {
+    const x = Math.max(-1, Math.min(1, v ?? 0));
+    // Update yaw rotation state and apply composite
+    this.updateBoneRotation('TONGUE', 'yaw', x);
+    this.applyCompositeRotation('TONGUE');
+    // Also update AU values for UI sync
+    if (x >= 0) {
+      this.auValues[40] = x;
+      this.auValues[39] = 0;
+    } else {
+      this.auValues[39] = -x;
+      this.auValues[40] = 0;
+    }
+    // Apply morphs
+    this.applyBothSides(x >= 0 ? 40 : 39, Math.abs(x));
+  };
+
+  /** Tongue — vertical continuum: down(38) ⟷ up(37) — positive = up */
+  setTongueVertical = (v: number) => {
+    const y = Math.max(-1, Math.min(1, v ?? 0));
+    // Update pitch rotation state and apply composite
+    this.updateBoneRotation('TONGUE', 'pitch', y);
+    this.applyCompositeRotation('TONGUE');
+    // Also update AU values for UI sync
+    if (y >= 0) {
+      this.auValues[37] = y;
+      this.auValues[38] = 0;
+    } else {
+      this.auValues[38] = -y;
+      this.auValues[37] = 0;
+    }
+    // Apply morphs
+    this.applyBothSides(y >= 0 ? 37 : 38, Math.abs(y));
+  };
+
   /** Unified composite handler for head and eyes with full pitch/yaw combination (+optional tilt/roll) */
   private applyCompositeMotion(
     baseYawId: number,
@@ -630,7 +667,7 @@ export class EngineThree {
    * This allows independent control of pitch/yaw/roll without overwriting.
    */
   private updateBoneRotation(
-    nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R',
+    nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE',
     axis: 'pitch' | 'yaw' | 'roll',
     value: number
   ) {
@@ -641,7 +678,7 @@ export class EngineThree {
    * Apply the complete composite rotation for a bone.
    * Combines pitch/yaw/roll from rotation state into a single quaternion.
    */
-  private applyCompositeRotation(nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R') {
+  private applyCompositeRotation(nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE') {
     const bones = this.bones;
     const entry = bones[nodeKey];
     if (!entry || !this.model) return;

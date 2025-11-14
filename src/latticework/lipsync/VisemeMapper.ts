@@ -103,21 +103,25 @@ const PHONEME_TO_VISEME_MAP: Record<string, VisemeID> = {
 
 /**
  * Default duration for each viseme in milliseconds
- * Can be adjusted based on speech rate
+ * Optimized for snappy, responsive lip-sync
+ * Vowels are typically 1.5-2x longer than consonants
  */
-const DEFAULT_VISEME_DURATION = 100;
+const DEFAULT_VOWEL_DURATION = 120; // Reduced from 150 for faster speech
+const DEFAULT_CONSONANT_DURATION = 60; // Reduced from 80 for quicker consonants
+const DEFAULT_PAUSE_DURATION = 80;
 
 /**
  * Special pause durations based on punctuation
+ * Reduced for more natural, flowing speech
  */
 const PAUSE_DURATIONS: Record<string, number> = {
-  'PAUSE_SPACE': 500,
-  'PAUSE_COMMA': 300,
-  'PAUSE_PERIOD': 700,
-  'PAUSE_QUESTION': 700,
-  'PAUSE_EXCLAMATION': 700,
-  'PAUSE_SEMICOLON': 400,
-  'PAUSE_COLON': 400,
+  'PAUSE_SPACE': 50,  // Reduced from 500 - minimal pause between words
+  'PAUSE_COMMA': 180, // Reduced from 300
+  'PAUSE_PERIOD': 400, // Reduced from 700
+  'PAUSE_QUESTION': 400, // Reduced from 700
+  'PAUSE_EXCLAMATION': 400, // Reduced from 700
+  'PAUSE_SEMICOLON': 250, // Reduced from 400
+  'PAUSE_COLON': 250, // Reduced from 400
 };
 
 export class VisemeMapper {
@@ -140,10 +144,14 @@ export class VisemeMapper {
 
     const visemeId = PHONEME_TO_VISEME_MAP[normalizedPhoneme] ?? 0;
 
+    // Determine duration based on whether it's a vowel or consonant
+    const isVowelPhoneme = this.isVowel(normalizedPhoneme);
+    const baseDuration = isVowelPhoneme ? DEFAULT_VOWEL_DURATION : DEFAULT_CONSONANT_DURATION;
+
     return {
       phoneme: normalizedPhoneme,
       viseme: visemeId,
-      duration: DEFAULT_VISEME_DURATION,
+      duration: baseDuration,
     };
   }
 

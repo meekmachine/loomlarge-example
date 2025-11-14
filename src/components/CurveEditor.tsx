@@ -11,6 +11,8 @@ export interface CurveEditorProps {
   keyframes: Keyframe[];
   duration?: number; // seconds, default 2.0
   onChange?: (updated: Keyframe[]) => void;
+  currentTime?: number; // current playback position in seconds
+  isPlaying?: boolean; // whether this snippet is currently playing
 }
 
 const WIDTH = 400;
@@ -86,6 +88,8 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
   keyframes,
   duration = 2.0,
   onChange,
+  currentTime = 0,
+  isPlaying = false,
 }) => {
   // Local state for drag interaction
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -198,9 +202,17 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
   return (
     <VStack align="stretch" spacing={1}>
       {label && (
-        <HStack mb={1} spacing={2}>
-          <Text fontWeight="bold" fontSize="md">{label}</Text>
-          <Text fontSize="xs" color="gray.400" opacity={0.7}>AU {auId}</Text>
+        <HStack mb={1} spacing={2} justify="space-between" w="100%">
+          <HStack spacing={2}>
+            <Text fontWeight="bold" fontSize="md">{label}</Text>
+            <Text fontSize="xs" color="gray.400" opacity={0.7}>AU {auId}</Text>
+          </HStack>
+          {isPlaying && (
+            <HStack spacing={1}>
+              <Box w={2} h={2} borderRadius="full" bg="green.400" />
+              <Text fontSize="xs" color="green.400" fontWeight="bold">Playing</Text>
+            </HStack>
+          )}
         </HStack>
       )}
       <Box
@@ -299,6 +311,26 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
             stroke="#38bdf8"
             strokeWidth={2.5}
           />
+          {/* Playback cursor (if playing) */}
+          {isPlaying && currentTime >= 0 && currentTime <= duration && (
+            <g pointerEvents="none">
+              <line
+                x1={timeToX(currentTime, duration)}
+                y1={MARGIN.top}
+                x2={timeToX(currentTime, duration)}
+                y2={HEIGHT - MARGIN.bottom}
+                stroke="#22c55e"
+                strokeWidth={2}
+                strokeDasharray="4 2"
+              />
+              <circle
+                cx={timeToX(currentTime, duration)}
+                cy={MARGIN.top - 6}
+                r={4}
+                fill="#22c55e"
+              />
+            </g>
+          )}
           {/* Keyframe points */}
           {editingKeyframes.map((kf, i) => {
             const x = timeToX(kf.time, duration);

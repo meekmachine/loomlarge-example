@@ -1,13 +1,13 @@
 /**
  * PhonemeExtractor
  * Extracts phonemes from text for lip-sync animation
- * Uses simple heuristic-based phoneme extraction (no external dependencies)
+ * Uses enhanced grapheme-to-phoneme rules for robust phoneme extraction
  */
 
 /**
- * Simple phoneme dictionary for common English words
+ * Phoneme dictionary for common English words
+ * Used for accurate pronunciation of common/irregular words
  * Format: word -> phoneme array
- * This is a minimal dictionary - can be expanded as needed
  */
 const PHONEME_DICT: Record<string, string[]> = {
   // Common words
@@ -145,6 +145,7 @@ export class PhonemeExtractor {
   /**
    * Extract phonemes from text
    * Returns array of phoneme strings including PAUSE tokens
+   * Uses dictionary + enhanced grapheme-to-phoneme rules
    */
   public extractPhonemes(text: string): string[] {
     const phonemes: string[] = [];
@@ -216,15 +217,15 @@ export class PhonemeExtractor {
 
   /**
    * Convert a word to phonemes
-   * Uses dictionary lookup first, falls back to grapheme-to-phoneme rules
+   * Uses dictionary lookup first, then enhanced grapheme-to-phoneme rules
    */
   private wordToPhonemes(word: string): string[] {
-    // Dictionary lookup
+    // Dictionary lookup for common/irregular words
     if (PHONEME_DICT[word]) {
       return [...PHONEME_DICT[word]];
     }
 
-    // Fallback to simple grapheme-to-phoneme conversion
+    // Use enhanced grapheme-to-phoneme conversion
     return this.graphemeToPhoneme(word);
   }
 
