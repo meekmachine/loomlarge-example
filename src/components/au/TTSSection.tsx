@@ -264,36 +264,102 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           }
 
           // === PROSODIC EXPRESSION AGENCY (SEPARATE FROM LIP-SYNC) ===
-          // Schedule brow raise every 3 words for prosodic emphasis
-          if (wordIndexRef.current % 3 === 0 && anim) {
-            const browName = `prosodic:brow_${Date.now()}`;
-            anim.schedule({
-              name: browName,
-              curves: {
-                '1': [ // Inner brow raiser (AU1)
-                  { time: 0.0, intensity: 0 },
-                  { time: 0.15, intensity: 35 },
-                  { time: 0.35, intensity: 45 },
-                  { time: 0.65, intensity: 0 },
-                ],
-                '2': [ // Outer brow raiser (AU2)
-                  { time: 0.0, intensity: 0 },
-                  { time: 0.15, intensity: 25 },
-                  { time: 0.35, intensity: 35 },
-                  { time: 0.65, intensity: 0 },
-                ],
-              },
-              maxTime: 0.65,
-              loop: false,
-              snippetCategory: 'prosodic', // Prosodic agency: separate from lip-sync
-              snippetPriority: 30,
-              snippetPlaybackRate: 1.0,
-              snippetIntensityScale: 0.8,
-            });
+          // Varied prosodic gestures for natural speech emphasis
+          if (anim) {
+            const wordMod = wordIndexRef.current % 6;
 
-            // Track snippet for cleanup (Prosodic agency)
-            prosodicSnippetsRef.current.push(browName);
-            console.log(`[Prosodic] Scheduled brow raise "${browName}"`);
+            // Pattern 1: Brow raise + subtle head tilt (every 3 words)
+            if (wordMod === 0) {
+              const gestureTime = Date.now();
+              const gestureName = `prosodic:emphasis_${gestureTime}`;
+              anim.schedule({
+                name: gestureName,
+                curves: {
+                  '1': [ // Inner brow raiser (AU1)
+                    { time: 0.0, intensity: 0 },
+                    { time: 0.15, intensity: 35 },
+                    { time: 0.45, intensity: 45 },
+                    { time: 0.75, intensity: 0 },
+                  ],
+                  '2': [ // Outer brow raiser (AU2)
+                    { time: 0.0, intensity: 0 },
+                    { time: 0.15, intensity: 25 },
+                    { time: 0.45, intensity: 35 },
+                    { time: 0.75, intensity: 0 },
+                  ],
+                  '55': [ // Head tilt left (AU55) - subtle
+                    { time: 0.0, intensity: 0 },
+                    { time: 0.25, intensity: 15 },
+                    { time: 0.65, intensity: 15 },
+                    { time: 0.95, intensity: 0 },
+                  ],
+                },
+                maxTime: 0.95,
+                loop: false,
+                snippetCategory: 'prosodic',
+                snippetPriority: 30,
+                snippetPlaybackRate: 1.0,
+                snippetIntensityScale: 0.8,
+              });
+              prosodicSnippetsRef.current.push(gestureName);
+              console.log(`[Prosodic] Brow + tilt emphasis "${gestureName}"`);
+            }
+
+            // Pattern 2: Head nod (every 4 words)
+            else if (wordMod === 3) {
+              const gestureTime = Date.now();
+              const gestureName = `prosodic:nod_${gestureTime}`;
+              anim.schedule({
+                name: gestureName,
+                curves: {
+                  '33': [ // Head turn up (AU33) - nod down motion
+                    { time: 0.0, intensity: 0 },
+                    { time: 0.2, intensity: 25 },
+                    { time: 0.5, intensity: 30 },
+                    { time: 0.8, intensity: 0 },
+                  ],
+                },
+                maxTime: 0.8,
+                loop: false,
+                snippetCategory: 'prosodic',
+                snippetPriority: 30,
+                snippetPlaybackRate: 1.0,
+                snippetIntensityScale: 0.7,
+              });
+              prosodicSnippetsRef.current.push(gestureName);
+              console.log(`[Prosodic] Head nod "${gestureName}"`);
+            }
+
+            // Pattern 3: Subtle frown for contemplative tone (every 5 words)
+            else if (wordMod === 4) {
+              const gestureTime = Date.now();
+              const gestureName = `prosodic:contemplate_${gestureTime}`;
+              anim.schedule({
+                name: gestureName,
+                curves: {
+                  '4': [ // Brow lowerer (AU4) - subtle frown
+                    { time: 0.0, intensity: 0 },
+                    { time: 0.2, intensity: 18 },
+                    { time: 0.6, intensity: 22 },
+                    { time: 1.0, intensity: 0 },
+                  ],
+                  '1': [ // Inner brow raiser (AU1) - slight counter for pensiveness
+                    { time: 0.0, intensity: 0 },
+                    { time: 0.25, intensity: 12 },
+                    { time: 0.65, intensity: 12 },
+                    { time: 1.0, intensity: 0 },
+                  ],
+                },
+                maxTime: 1.0,
+                loop: false,
+                snippetCategory: 'prosodic',
+                snippetPriority: 30,
+                snippetPlaybackRate: 1.0,
+                snippetIntensityScale: 0.6,
+              });
+              prosodicSnippetsRef.current.push(gestureName);
+              console.log(`[Prosodic] Contemplative frown "${gestureName}"`);
+            }
           }
 
           wordIndexRef.current++;
