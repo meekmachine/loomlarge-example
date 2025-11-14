@@ -66,10 +66,10 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
   const ttsRef = useRef<TTSService | null>(null);
   const lipSyncRef = useRef<LipSyncService | null>(null);
   const wordIndexRef = useRef(0);
-  const browSnippetRef = useRef<string | null>(null);
 
-  // Track all created lipsync snippets for cleanup
-  const lipsyncSnippetsRef = useRef<string[]>([]);
+  // Track all created snippets for cleanup (separate by agency)
+  const lipsyncSnippetsRef = useRef<string[]>([]); // LipSync agency: visemes + jaw
+  const prosodicSnippetsRef = useRef<string[]>([]); // Prosodic agency: brow raises
 
   // Initialize services
   useEffect(() => {
@@ -104,8 +104,9 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           setStatus('speaking');
           wordIndexRef.current = 0;
 
-          // Clear previous lipsync snippets
+          // Clear previous snippets from both agencies
           lipsyncSnippetsRef.current = [];
+          prosodicSnippetsRef.current = [];
 
           // Start animation playback
           anim.play();
@@ -115,12 +116,19 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
           setIsSpeaking(false);
           setStatus('idle');
 
-          // Remove all lipsync snippets
+          // Remove all snippets from both agencies
           if (anim) {
+            // Remove LipSync agency snippets (visemes + jaw)
             lipsyncSnippetsRef.current.forEach(snippetName => {
               anim.remove(snippetName);
             });
             lipsyncSnippetsRef.current = [];
+
+            // Remove Prosodic agency snippets (brow raises)
+            prosodicSnippetsRef.current.forEach(snippetName => {
+              anim.remove(snippetName);
+            });
+            prosodicSnippetsRef.current = [];
 
             // Schedule a final neutral snippet to return ALL visemes and jaw to zero
             const neutralSnippet = `neutral_${Date.now()}`;
@@ -145,7 +153,7 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
               curves: neutralCurves,
               maxTime: 0.3,
               loop: false,
-              snippetCategory: 'combined', // Combined visemes + AU
+              snippetCategory: 'combined', // LipSync agency: combined visemes + AU
               snippetPriority: 60,
               snippetPlaybackRate: 1.0,
               snippetIntensityScale: 1.0,
@@ -155,12 +163,6 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
             setTimeout(() => {
               anim.remove(neutralSnippet);
             }, 350);
-          }
-
-          // Remove brow snippet
-          if (browSnippetRef.current) {
-            anim.remove(browSnippetRef.current);
-            browSnippetRef.current = null;
           }
         },
         onBoundary: ({ word, charIndex }) => {
@@ -182,22 +184,30 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
               const timeInSec = visemeEvent.offsetMs / 1000;
               const durationInSec = visemeEvent.durationMs / 1000;
 
-              // Natural timing: slower onset, hold, faster release
-              const onsetTime = durationInSec * 0.2; // 20% for onset
-              const peakTime = durationInSec * 0.6; // Hold through 60%
-              const releaseTime = durationInSec * 0.2; // 20% for release
+              // Smoother, more natural timing with anticipation
+              const anticipation = durationInSec * 0.1; // Small anticipation
+              const attack = durationInSec * 0.25; // Attack to peak
+              const sustain = durationInSec * 0.45; // Hold at peak
+              const release = durationInSec * 0.2; // Release back to zero
 
               // Initialize curve array if needed
               if (!combinedCurves[visemeId]) {
                 combinedCurves[visemeId] = [];
               }
 
-              // Viseme animation with natural motion
+              // Check if previous viseme was same - if so, don't go to zero
+              const lastKeyframe = combinedCurves[visemeId][combinedCurves[visemeId].length - 1];
+              const startIntensity = (lastKeyframe && lastKeyframe.time > timeInSec - 0.02)
+                ? lastKeyframe.intensity
+                : 0;
+
+              // Viseme animation with smooth, natural motion
               combinedCurves[visemeId].push(
-                { time: timeInSec, intensity: 0 }, // Start at zero
-                { time: timeInSec + onsetTime, intensity: 85 * lipsyncIntensity }, // Quick to near-peak
-                { time: timeInSec + peakTime, intensity: 100 * lipsyncIntensity }, // Peak and hold
-                { time: timeInSec + durationInSec, intensity: 0 } // Return to zero
+                { time: timeInSec, intensity: startIntensity }, // Start from previous or zero
+                { time: timeInSec + anticipation, intensity: 30 * lipsyncIntensity }, // Gentle anticipation
+                { time: timeInSec + attack, intensity: 95 * lipsyncIntensity }, // Quick to peak
+                { time: timeInSec + sustain, intensity: 100 * lipsyncIntensity }, // Hold at peak
+                { time: timeInSec + durationInSec, intensity: 0 } // Smooth release
               );
 
               // Add jaw activation coordinated with viseme
@@ -207,12 +217,22 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
                   combinedCurves['26'] = [];
                 }
 
-                // Jaw follows viseme timing but with smoother motion
+                // Jaw moves slower and smoother than lips
+                const jawAnticipation = durationInSec * 0.15;
+                const jawAttack = durationInSec * 0.3;
+                const jawSustain = durationInSec * 0.4;
+
+                const lastJawKeyframe = combinedCurves['26'][combinedCurves['26'].length - 1];
+                const startJawIntensity = (lastJawKeyframe && lastJawKeyframe.time > timeInSec - 0.02)
+                  ? lastJawKeyframe.intensity
+                  : 0;
+
                 combinedCurves['26'].push(
-                  { time: timeInSec, intensity: 0 },
-                  { time: timeInSec + onsetTime, intensity: jawAmount * 90 * jawActivation },
-                  { time: timeInSec + peakTime, intensity: jawAmount * 100 * jawActivation },
-                  { time: timeInSec + durationInSec, intensity: 0 }
+                  { time: timeInSec, intensity: startJawIntensity },
+                  { time: timeInSec + jawAnticipation, intensity: jawAmount * 20 * jawActivation }, // Gentle start
+                  { time: timeInSec + jawAttack, intensity: jawAmount * 90 * jawActivation }, // Rise to peak
+                  { time: timeInSec + jawSustain, intensity: jawAmount * 100 * jawActivation }, // Hold
+                  { time: timeInSec + durationInSec, intensity: 0 } // Smooth close
                 );
               }
             });
@@ -238,44 +258,42 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
               snippetIntensityScale: 1.0,
             });
 
-            // Track snippet for cleanup
+            // Track snippet for cleanup (LipSync agency)
             lipsyncSnippetsRef.current.push(snippetName);
             console.log(`[TTS] Scheduled snippet "${snippetName}" with ${Object.keys(combinedCurves).length} curves, duration: ${maxTime.toFixed(3)}s`);
+          }
 
-            // Schedule brow raise every few words for prosodic emphasis
-            if (wordIndexRef.current % 3 === 0 && anim) {
-              // Remove previous brow snippet
-              if (browSnippetRef.current) {
-                anim.remove(browSnippetRef.current);
-              }
+          // === PROSODIC EXPRESSION AGENCY (SEPARATE FROM LIP-SYNC) ===
+          // Schedule brow raise every 3 words for prosodic emphasis
+          if (wordIndexRef.current % 3 === 0 && anim) {
+            const browName = `prosodic:brow_${Date.now()}`;
+            anim.schedule({
+              name: browName,
+              curves: {
+                '1': [ // Inner brow raiser (AU1)
+                  { time: 0.0, intensity: 0 },
+                  { time: 0.15, intensity: 35 },
+                  { time: 0.35, intensity: 45 },
+                  { time: 0.65, intensity: 0 },
+                ],
+                '2': [ // Outer brow raiser (AU2)
+                  { time: 0.0, intensity: 0 },
+                  { time: 0.15, intensity: 25 },
+                  { time: 0.35, intensity: 35 },
+                  { time: 0.65, intensity: 0 },
+                ],
+              },
+              maxTime: 0.65,
+              loop: false,
+              snippetCategory: 'prosodic', // Prosodic agency: separate from lip-sync
+              snippetPriority: 30,
+              snippetPlaybackRate: 1.0,
+              snippetIntensityScale: 0.8,
+            });
 
-              const browName = `brow_${Date.now()}`;
-              anim.schedule({
-                name: browName,
-                curves: {
-                  '1': [ // Inner brow raiser
-                    { time: 0.0, intensity: 0 },
-                    { time: 0.15, intensity: 35 },
-                    { time: 0.35, intensity: 45 },
-                    { time: 0.65, intensity: 0 },
-                  ],
-                  '2': [ // Outer brow raiser
-                    { time: 0.0, intensity: 0 },
-                    { time: 0.15, intensity: 25 },
-                    { time: 0.35, intensity: 35 },
-                    { time: 0.65, intensity: 0 },
-                  ],
-                },
-                maxTime: 0.65,
-                loop: false,
-                snippetCategory: 'prosodic',
-                snippetPriority: 30,
-                snippetPlaybackRate: 1.0,
-                snippetIntensityScale: 0.8,
-              });
-
-              browSnippetRef.current = browName;
-            }
+            // Track snippet for cleanup (Prosodic agency)
+            prosodicSnippetsRef.current.push(browName);
+            console.log(`[Prosodic] Scheduled brow raise "${browName}"`);
           }
 
           wordIndexRef.current++;
@@ -305,15 +323,16 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
       ttsRef.current?.dispose();
       lipSyncRef.current?.dispose();
 
-      // Remove any remaining lipsync snippets
+      // Remove any remaining snippets from both agencies
       lipsyncSnippetsRef.current.forEach(snippetName => {
         anim.remove(snippetName);
       });
       lipsyncSnippetsRef.current = [];
 
-      if (browSnippetRef.current) {
-        anim.remove(browSnippetRef.current);
-      }
+      prosodicSnippetsRef.current.forEach(snippetName => {
+        anim.remove(snippetName);
+      });
+      prosodicSnippetsRef.current = [];
     };
   }, [engine, anim, rate, jawActivation, lipsyncIntensity]);
 
@@ -356,12 +375,19 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
     setIsSpeaking(false);
     setStatus('idle');
 
-    // Remove all lipsync snippets from animation service
+    // Remove all snippets from both agencies
     if (anim) {
+      // Remove LipSync agency snippets (visemes + jaw)
       lipsyncSnippetsRef.current.forEach(snippetName => {
         anim.remove(snippetName);
       });
       lipsyncSnippetsRef.current = [];
+
+      // Remove Prosodic agency snippets (brow raises)
+      prosodicSnippetsRef.current.forEach(snippetName => {
+        anim.remove(snippetName);
+      });
+      prosodicSnippetsRef.current = [];
 
       // Schedule a final neutral snippet to return ALL visemes and jaw to zero
       const neutralSnippet = `neutral_stop_${Date.now()}`;
@@ -386,7 +412,7 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
         curves: neutralCurves,
         maxTime: 0.3,
         loop: false,
-        snippetCategory: 'combined', // Combined visemes + AU
+        snippetCategory: 'combined', // LipSync agency: combined visemes + AU
         snippetPriority: 60,
         snippetPlaybackRate: 1.0,
         snippetIntensityScale: 1.0,
@@ -396,12 +422,6 @@ export default function TTSSection({ engine, disabled = false }: TTSSectionProps
       setTimeout(() => {
         anim.remove(neutralSnippet);
       }, 350);
-    }
-
-    // Remove brow snippet
-    if (browSnippetRef.current) {
-      anim.remove(browSnippetRef.current);
-      browSnippetRef.current = null;
     }
   };
 

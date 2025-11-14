@@ -486,12 +486,18 @@ export class AnimationScheduler {
       // Clamp values to [0,1]
       const v = clamp01(entry.v);
 
-      // Handle viseme snippets differently - map index to viseme morph name
-      if (entry.category === 'visemeSnippet') {
-        const visemeIndex = parseInt(curveId, 10);
-        if (!isNaN(visemeIndex) && visemeIndex >= 0 && visemeIndex < VISEME_KEYS.length) {
-          const morphName = VISEME_KEYS[visemeIndex];
+      // Handle viseme snippets and combined snippets differently - map index to viseme morph name
+      if (entry.category === 'visemeSnippet' || entry.category === 'combined') {
+        const numericId = parseInt(curveId, 10);
+
+        // Check if this is a viseme index (0-14) or an AU (26, etc.)
+        if (!isNaN(numericId) && numericId >= 0 && numericId < VISEME_KEYS.length) {
+          // It's a viseme - apply as morph
+          const morphName = VISEME_KEYS[numericId];
           (this.host.transitionMorph ?? this.host.setMorph)?.(morphName, v, entry.durMs);
+        } else if (!isNaN(numericId)) {
+          // It's an AU (like 26 for jaw) - apply as AU
+          (this.host.transitionAU ?? this.host.applyAU)(numericId, v, entry.durMs);
         }
       } else {
         // AU snippets: apply as Action Unit ID
