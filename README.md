@@ -1,4 +1,4 @@
-![Latticework by Lovelace LOL](https://github.com/user-attachments/assets/60a2f6de-8db3-4652-8d5e-96b8d88f8d15)
+![Latticework by Lovelace LOL](LoomLarge.png)
 
 # LoomLarge (Latticework Animation Platform)
 
