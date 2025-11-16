@@ -16,6 +16,8 @@ export interface ConversationConfig {
   minSpeakTime?: number;
   /** Optional eye/head tracking service for natural gaze coordination */
   eyeHeadTracking?: EyeHeadTrackingService;
+  /** Optional prosodic service for speech-synchronized gestures (brow raises, head nods) */
+  prosodicService?: any; // ProsodicService
 }
 
 export interface ConversationCallbacks {

@@ -312,6 +312,8 @@ export function createAnimationService(host: HostCaps){
     resumeSnippet(name: string){ return (impl as any).resumeSnippet?.(name); },
     stopSnippet(name: string){ return (impl as any).stopSnippet?.(name); },
     getScheduleSnapshot(){ return (impl as any).getScheduleSnapshot?.(); },
+    /** Get current value of an AU or morph for smooth continuity when scheduling new snippets */
+    getCurrentValue(auId: string): number { return (impl as any).getCurrentValue?.(auId) ?? 0; },
     /** Subscribe to machine state transitions for UI updates */
     onTransition(cb: (snapshot: any) => void) {
       const sub = (machine as any).subscribe?.((snapshot: any) => {

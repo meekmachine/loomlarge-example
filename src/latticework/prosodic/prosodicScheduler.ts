@@ -100,6 +100,7 @@ export class ProsodicScheduler {
       snippetPriority: snippet.priority,
       snippetPlaybackRate: snippet.playbackRate,
       snippetIntensityScale: snippet.intensityScale,
+      snippetBlendMode: 'additive' as const,  // ✅ Use additive blending to combine with eye/head tracking
     };
 
     const scheduledName = this.host.scheduleSnippet(animSnippet);

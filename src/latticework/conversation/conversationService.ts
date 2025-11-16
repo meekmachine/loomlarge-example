@@ -23,13 +23,14 @@ import type { TTSService } from '../tts/ttsService';
 import type { TranscriptionService } from '../transcription/transcriptionService';
 
 export class ConversationService implements ConversationServiceAPI {
-  private config: Required<Omit<ConversationConfig, 'eyeHeadTracking'>> & { eyeHeadTracking?: any };
+  private config: Required<Omit<ConversationConfig, 'eyeHeadTracking' | 'prosodicService'>> & { eyeHeadTracking?: any; prosodicService?: any };
   private callbacks: ConversationCallbacks;
   private context: ConversationContext;
 
   private tts: TTSService;
   private transcription: TranscriptionService;
   private eyeHeadTracking: any; // EyeHeadTrackingService | undefined
+  private prosodicService: any; // ProsodicService | undefined
   private flowGenerator: ConversationFlow | null = null;
 
   private isRunning = false;
@@ -46,6 +47,7 @@ export class ConversationService implements ConversationServiceAPI {
     this.tts = tts;
     this.transcription = transcription;
     this.eyeHeadTracking = config.eyeHeadTracking;
+    this.prosodicService = config.prosodicService;
 
     this.context = {
       state: 'idle',
@@ -163,6 +165,12 @@ export class ConversationService implements ConversationServiceAPI {
       this.scheduleNaturalGazeDuringSpeech(text);
     }
 
+    // Start prosodic gestures (brow raises, head nods during speech)
+    if (this.prosodicService) {
+      this.prosodicService.startTalking();
+      console.log('[ConversationService] Prosodic gestures started');
+    }
+
     // Notify transcription service to filter this text (prevent echo)
     if (this.transcription.notifyAgentSpeech) {
       this.transcription.notifyAgentSpeech(text);
@@ -183,6 +191,12 @@ export class ConversationService implements ConversationServiceAPI {
         clearTimeout(this.gazeScheduleTimer);
         this.gazeScheduleTimer = null;
       }
+    }
+
+    // Stop prosodic gestures (gradual fade-out)
+    if (this.prosodicService) {
+      this.prosodicService.stopTalking();
+      console.log('[ConversationService] Prosodic gestures stopping (fade-out)');
     }
 
     // After speaking, start listening for user

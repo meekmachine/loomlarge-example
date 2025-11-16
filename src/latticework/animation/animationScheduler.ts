@@ -49,6 +49,7 @@ export function normalize(sn: any): Snippet & { curves: Record<string, Array<{ t
       snippetPriority: sn.snippetPriority ?? 0,
       snippetPlaybackRate: sn.snippetPlaybackRate ?? 1,
       snippetIntensityScale: sn.snippetIntensityScale ?? 1,
+      snippetBlendMode: sn.snippetBlendMode ?? 'replace',  // Default to 'replace' for backward compatibility
       curves
     } as any;
   }
@@ -77,6 +78,7 @@ export function normalize(sn: any): Snippet & { curves: Record<string, Array<{ t
     snippetPriority: sn.snippetPriority ?? 0,
     snippetPlaybackRate: sn.snippetPlaybackRate ?? 1,
     snippetIntensityScale: sn.snippetIntensityScale ?? 1,
+    snippetBlendMode: sn.snippetBlendMode ?? 'replace',
     curves
   } as any;
 }
@@ -109,6 +111,8 @@ export class AnimationScheduler {
   private useExternalStep = true;
   /** Track snippets already notified as completed to avoid duplicate callbacks */
   private ended = new Set<string>();
+  /** Track current AU values for smooth continuity when scheduling new snippets */
+  private currentValues = new Map<string, number>();
   /** Detect and handle natural snippet completions (non-looping). Uses wall-clock anchoring. */
   private checkCompletions(tPlay: number) {
     const snippets = this.currentSnippets();
@@ -184,6 +188,9 @@ export class AnimationScheduler {
     const targets = new Map<string, { v: number; pri: number; durMs: number; category: string }>();
     const now = this.now();
 
+    // Track additive contributions for each AU (all snippets with blendMode='additive' contribute)
+    const additiveContributions = new Map<string, Array<{ snippet: string; v: number; pri: number }>>();
+
     // Track conflicts for debugging
     const conflicts = new Map<string, Array<{ snippet: string; pri: number; v: number; won: boolean }>>();
 
@@ -195,6 +202,7 @@ export class AnimationScheduler {
       const dur = this.totalDuration(sn);
       const scale = sn.snippetIntensityScale ?? 1;
       const pri = typeof sn.snippetPriority === 'number' ? sn.snippetPriority : 0;
+      const blendMode = (sn as any).snippetBlendMode ?? 'replace';
 
       // Use wall-clock anchoring (old agency approach) - each snippet has independent timeline
       if (!(sn as any).startWallTime) continue; // Skip if not initialized
@@ -231,13 +239,22 @@ export class AnimationScheduler {
         const durMs = Math.max(50, Math.min(1000, timeToNext * 1000)); // clamp between 50ms and 1000ms
         const prev = targets.get(curveId);
 
+        // ADDITIVE BLENDING: snippets with blendMode='additive' contribute cumulatively
+        if (blendMode === 'additive') {
+          if (!additiveContributions.has(curveId)) {
+            additiveContributions.set(curveId, []);
+          }
+          additiveContributions.get(curveId)!.push({ snippet: sn.name || 'unknown', v, pri });
+          continue; // Don't compete with replace-mode snippets here, handle after loop
+        }
+
         // Track conflict for debugging (only when there's a previous value)
         if (prev) {
           if (!conflicts.has(curveId)) conflicts.set(curveId, []);
           conflicts.get(curveId)!.push({ snippet: sn.name || 'unknown', pri, v, won: false });
         }
 
-        // Old agency approach: higher priority wins, ties broken by higher value
+        // REPLACE MODE (default): higher priority wins, ties broken by higher value
         const wins = !prev || pri > prev.pri || (pri === prev.pri && v > prev.v);
         if (wins) {
           targets.set(curveId, { v, pri, durMs, category: sn.snippetCategory || 'default' });
@@ -247,6 +264,27 @@ export class AnimationScheduler {
             arr[arr.length - 1].won = true;
           }
         }
+      }
+    }
+
+    // Apply additive contributions: sum all additive values and combine with replace-mode winner
+    for (const [curveId, contributions] of additiveContributions.entries()) {
+      // Sum all additive values
+      const additiveSum = contributions.reduce((sum, c) => sum + c.v, 0);
+      const maxAdditivePri = Math.max(...contributions.map(c => c.pri), 0);
+
+      const replaceTarget = targets.get(curveId);
+
+      if (replaceTarget) {
+        // Combine replace-mode winner with additive sum
+        const combined = clamp01(replaceTarget.v + additiveSum);
+        targets.set(curveId, { ...replaceTarget, v: combined });
+        console.log(`[Scheduler] Additive blend: AU ${curveId} = ${replaceTarget.v.toFixed(3)} (replace) + ${additiveSum.toFixed(3)} (additive) = ${combined.toFixed(3)}`);
+      } else {
+        // No replace-mode snippet, just use additive sum
+        const combined = clamp01(additiveSum);
+        targets.set(curveId, { v: combined, pri: maxAdditivePri, durMs: 120, category: 'default' });
+        console.log(`[Scheduler] Additive blend: AU ${curveId} = ${additiveSum.toFixed(3)} (additive only) = ${combined.toFixed(3)}`);
       }
     }
 
@@ -265,6 +303,8 @@ export class AnimationScheduler {
     const targets = this.buildTargetMap(this.currentSnippets(), tPlay);
     targets.forEach((entry, curveId) => {
       const v = entry.v;
+      // Track current value for continuity
+      this.currentValues.set(curveId, v);
       if (isNum(curveId)) (this.host.transitionAU ?? this.host.applyAU)(parseInt(curveId, 10), v, 120);
       else (this.host.transitionMorph ?? this.host.setMorph)(curveId, v, 80);
     });
@@ -272,21 +312,66 @@ export class AnimationScheduler {
   };
 
   load(snippet: Snippet) {
-    this.safeSend({ type: 'LOAD_ANIMATION', data: snippet });
+    // AUTOMATIC CONTINUITY: Apply current values to first keyframe (time=0) before loading
+    // This ensures smooth transitions when snippets take over from other snippets
+    const snWithContinuity = this.applyContinuity(snippet);
+
+    this.safeSend({ type: 'LOAD_ANIMATION', data: snWithContinuity });
 
     // Initialize startWallTime immediately for independent wall-clock anchoring
     try {
       const st = this.machine.getSnapshot?.();
       const arr = st?.context?.animations as any[] || [];
-      const sn = arr.find((s:any) => s?.name === snippet.name);
+      const sn = arr.find((s:any) => s?.name === snWithContinuity.name);
       if (sn && !sn.startWallTime) {
         sn.startWallTime = this.now();
         sn.isPlaying = true; // Auto-start when loaded
-        console.log('[Scheduler] load() initialized', snippet.name, 'startWallTime:', sn.startWallTime);
+        console.log('[Scheduler] load() initialized', snWithContinuity.name, 'startWallTime:', sn.startWallTime);
       }
     } catch {}
 
-    return snippet.name;
+    return snWithContinuity.name;
+  }
+
+  /**
+   * Apply animation continuity: replace first keyframe (time=0) with current values
+   * to ensure smooth transitions when taking over from other snippets.
+   *
+   * This eliminates the need for schedulers to manually query getCurrentValue() -
+   * the animation agency handles continuity automatically.
+   */
+  private applyContinuity(snippet: Snippet): Snippet {
+    const curves = (snippet as any).curves || {};
+    const continuousCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
+
+    for (const [auId, keyframes] of Object.entries<Array<{ time: number; intensity: number }>>(curves)) {
+      if (!keyframes || keyframes.length === 0) {
+        continuousCurves[auId] = keyframes;
+        continue;
+      }
+
+      // Clone the keyframe array to avoid mutating the original
+      const newKeyframes = [...keyframes];
+
+      // If first keyframe is at time 0, replace its intensity with current value
+      if (newKeyframes[0].time === 0) {
+        const currentValue = this.currentValues.get(auId) ?? 0;
+
+        // Only apply continuity if current value is different from keyframe value
+        // This avoids unnecessary logging for neutral positions
+        if (Math.abs(currentValue - newKeyframes[0].intensity) > 0.001) {
+          console.log(`[Scheduler] Continuity: ${snippet.name} AU ${auId} starts from ${currentValue.toFixed(3)} (was ${newKeyframes[0].intensity.toFixed(3)})`);
+          newKeyframes[0] = { time: 0, intensity: currentValue };
+        }
+      }
+
+      continuousCurves[auId] = newKeyframes;
+    }
+
+    return {
+      ...snippet,
+      curves: continuousCurves
+    } as any;
   }
 
   loadFromJSON(data: any) {
@@ -584,5 +669,18 @@ export class AnimationScheduler {
         intensityScale: sn.snippetIntensityScale ?? 1
       };
     });
+  }
+
+  /**
+   * Get the current value of an AU or morph target.
+   * This is the value that was most recently applied to the engine.
+   * Useful for smooth continuity when scheduling new snippets that should
+   * start from the current state instead of jumping back to 0.
+   *
+   * @param auId - AU ID as string (e.g., '31', '33', '61') or morph name
+   * @returns Current value (0-1), or 0 if never applied
+   */
+  getCurrentValue(auId: string): number {
+    return this.currentValues.get(auId) ?? 0;
   }
 }

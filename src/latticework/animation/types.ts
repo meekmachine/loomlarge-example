@@ -28,6 +28,16 @@ export type Snippet = {
   snippetPlaybackRate?: number;    // default 1
   snippetIntensityScale?: number;  // default 1
 
+  /**
+   * Blend mode for combining multiple snippets on same AU:
+   * - 'replace' (default): Higher priority wins, replaces lower priority values
+   * - 'additive': Values are summed together (clamped to [0,1])
+   *
+   * Example: Head tracking (yaw=0.3) + Prosodic nod (pitch=0.4) with additive mode
+   * allows both to contribute simultaneously for natural combined movement.
+   */
+  snippetBlendMode?: 'replace' | 'additive';
+
   // Keyframes (one or both may appear)
   au?: AUKeyframe[];
   viseme?: VisemeKeyframe[];
@@ -47,6 +57,7 @@ export type NormalizedSnippet = {
   snippetIntensityScale: number;
   snippetCategory: 'auSnippet' | 'visemeSnippet' | 'default';
   snippetPriority: number;
+  snippetBlendMode: 'replace' | 'additive';  // Blend mode for AU combination
 
   // Playback bookkeeping (UI/engine parity)
   currentTime: number;
