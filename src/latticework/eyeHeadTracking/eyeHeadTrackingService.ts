@@ -162,6 +162,19 @@ export class EyeHeadTrackingService {
   }
 
   /**
+   * Reset gaze to neutral center position
+   *
+   * Use this when you want to explicitly return the head/eyes to center,
+   * such as when switching tracking modes or ending a conversation.
+   *
+   * @param duration - Transition duration in milliseconds (default: 300ms)
+   */
+  public resetToNeutral(duration: number = 300): void {
+    this.setGazeTarget({ x: 0, y: 0, z: 0 });
+    console.log(`[EyeHeadTracking] Resetting to neutral position over ${duration}ms`);
+  }
+
+  /**
    * Trigger a blink
    */
   public blink(): void {
@@ -253,13 +266,22 @@ export class EyeHeadTrackingService {
 
   /**
    * Set tracking mode (manual, mouse, or webcam)
+   *
+   * IMPORTANT: When switching modes, the head/eyes PRESERVE their last position.
+   * They do NOT reset to neutral automatically. This is by design:
+   * - Switching from mouse→manual: Head stays at last mouse position
+   * - Switching from webcam→manual: Head stays at last detected face position
+   * - Call resetToNeutral() explicitly if you want to return to center
+   *
+   * This behavior is enabled by the automatic continuity system in the animation agency,
+   * which ensures smooth transitions from the current position when new gaze targets are set.
    */
   public setMode(mode: 'manual' | 'mouse' | 'webcam'): void {
-    // Clean up current mode
+    // Clean up current mode (removes listeners, but preserves last position)
     this.cleanupMode();
 
     this.trackingMode = mode;
-    console.log(`[EyeHeadTracking] Mode set to: ${mode}`);
+    console.log(`[EyeHeadTracking] Mode set to: ${mode} (last position preserved)`);
 
     // Setup new mode
     if (mode === 'mouse') {
@@ -342,7 +364,7 @@ export class EyeHeadTrackingService {
   }
 
   /**
-   * Apply gaze to character using animationManager
+   * Apply gaze to character using animation agency (or direct composite calls)
    * Converts normalized gaze coordinates to AU values
    */
   private applyGazeToCharacter(target: GazeTarget): void {
