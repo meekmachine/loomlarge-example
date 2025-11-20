@@ -1098,6 +1098,281 @@ export class EngineThree {
     return undefined;
   }
 
+  /**
+   * Get hair geometry info for vertex manipulation
+   * Returns cloned geometry that can be manipulated without affecting original
+   */
+  getHairGeometry(objectName: string): {
+    geometry: THREE.BufferGeometry | null;
+    originalPositions: Float32Array | null;
+    vertexCount: number;
+  } | null {
+    const object = this.model?.getObjectByName(objectName);
+    if (!object || !(object as THREE.Mesh).isMesh) return null;
+
+    const mesh = object as THREE.Mesh;
+    const geometry = mesh.geometry;
+
+    if (!geometry.attributes.position) return null;
+
+    // Store original positions for reset/animation
+    const originalPositions = new Float32Array(geometry.attributes.position.array);
+
+    return {
+      geometry,
+      originalPositions,
+      vertexCount: geometry.attributes.position.count,
+    };
+  }
+
+  /**
+   * Apply vertex displacement to hair geometry
+   * Uses a displacement function that takes vertex position and returns new position
+   */
+  applyHairVertexDisplacement(
+    objectName: string,
+    displacementFn: (vertex: THREE.Vector3, index: number) => THREE.Vector3,
+    blend: number = 1.0
+  ): boolean {
+    const object = this.model?.getObjectByName(objectName);
+    if (!object || !(object as THREE.Mesh).isMesh) return false;
+
+    const mesh = object as THREE.Mesh;
+    const geometry = mesh.geometry;
+    const positionAttr = geometry.attributes.position;
+
+    if (!positionAttr) return false;
+
+    // Get or store original positions
+    if (!geometry.userData.originalPositions) {
+      geometry.userData.originalPositions = new Float32Array(positionAttr.array);
+    }
+
+    const originalPositions = geometry.userData.originalPositions as Float32Array;
+    const vertex = new THREE.Vector3();
+
+    for (let i = 0; i < positionAttr.count; i++) {
+      const i3 = i * 3;
+
+      // Get original vertex position
+      vertex.set(
+        originalPositions[i3],
+        originalPositions[i3 + 1],
+        originalPositions[i3 + 2]
+      );
+
+      // Apply displacement function
+      const newVertex = displacementFn(vertex, i);
+
+      // Blend with original
+      positionAttr.setXYZ(
+        i,
+        originalPositions[i3] + (newVertex.x - originalPositions[i3]) * blend,
+        originalPositions[i3 + 1] + (newVertex.y - originalPositions[i3 + 1]) * blend,
+        originalPositions[i3 + 2] + (newVertex.z - originalPositions[i3 + 2]) * blend
+      );
+    }
+
+    positionAttr.needsUpdate = true;
+    geometry.computeVertexNormals(); // Recompute normals for proper lighting
+    return true;
+  }
+
+  /**
+   * Apply wave/wind effect to hair vertices
+   */
+  applyHairWaveEffect(
+    objectName: string,
+    options: {
+      amplitude?: number;      // Wave height
+      frequency?: number;      // Wave speed
+      wavelength?: number;     // Wave spacing
+      direction?: THREE.Vector3; // Wave direction
+      time?: number;          // Animation time
+      blend?: number;         // Blend factor (0-1)
+    } = {}
+  ): boolean {
+    const {
+      amplitude = 0.1,
+      frequency = 1.0,
+      wavelength = 1.0,
+      direction = new THREE.Vector3(1, 0, 0),
+      time = 0,
+      blend = 1.0,
+    } = options;
+
+    const normalizedDir = direction.clone().normalize();
+
+    return this.applyHairVertexDisplacement(
+      objectName,
+      (vertex, _index) => {
+        // Calculate distance along wave direction
+        const distance = vertex.dot(normalizedDir);
+
+        // Apply sine wave
+        const wave = Math.sin(distance * wavelength + time * frequency) * amplitude;
+
+        // Displace along Y-axis (upward wave)
+        return new THREE.Vector3(
+          vertex.x,
+          vertex.y + wave,
+          vertex.z
+        );
+      },
+      blend
+    );
+  }
+
+  /**
+   * Apply gravity/droop effect to hair vertices
+   */
+  applyHairGravityEffect(
+    objectName: string,
+    options: {
+      strength?: number;       // Gravity strength
+      direction?: THREE.Vector3; // Gravity direction
+      falloff?: number;        // Distance falloff
+      pivot?: THREE.Vector3;   // Pivot point (hair root)
+      blend?: number;
+    } = {}
+  ): boolean {
+    const {
+      strength = 0.5,
+      direction = new THREE.Vector3(0, -1, 0),
+      falloff = 1.0,
+      pivot = new THREE.Vector3(0, 0, 0),
+      blend = 1.0,
+    } = options;
+
+    const normalizedDir = direction.clone().normalize();
+
+    return this.applyHairVertexDisplacement(
+      objectName,
+      (vertex, _index) => {
+        // Calculate distance from pivot (hair root)
+        const distance = vertex.distanceTo(pivot);
+
+        // Apply falloff (more effect further from root)
+        const falloffFactor = Math.pow(distance * falloff, 2);
+
+        // Apply gravity displacement
+        const displacement = normalizedDir.clone().multiplyScalar(strength * falloffFactor);
+
+        return vertex.clone().add(displacement);
+      },
+      blend
+    );
+  }
+
+  /**
+   * Apply curl/twist effect to hair vertices
+   */
+  applyHairCurlEffect(
+    objectName: string,
+    options: {
+      intensity?: number;      // Curl intensity
+      radius?: number;         // Curl radius
+      axis?: THREE.Vector3;    // Curl axis
+      center?: THREE.Vector3;  // Center point
+      blend?: number;
+    } = {}
+  ): boolean {
+    const {
+      intensity = 1.0,
+      radius = 0.5,
+      axis = new THREE.Vector3(0, 1, 0),
+      center = new THREE.Vector3(0, 0, 0),
+      blend = 1.0,
+    } = options;
+
+    const normalizedAxis = axis.clone().normalize();
+
+    return this.applyHairVertexDisplacement(
+      objectName,
+      (vertex, _index) => {
+        // Vector from center to vertex
+        const toVertex = vertex.clone().sub(center);
+
+        // Project onto axis to get height
+        const height = toVertex.dot(normalizedAxis);
+
+        // Get perpendicular component
+        const perpendicular = toVertex.clone().sub(
+          normalizedAxis.clone().multiplyScalar(height)
+        );
+
+        // Apply rotation around axis based on height
+        const angle = height * intensity;
+        const rotatedPerp = perpendicular.clone()
+          .applyAxisAngle(normalizedAxis, angle);
+
+        // Scale by radius
+        rotatedPerp.multiplyScalar(radius);
+
+        // Reconstruct position
+        return center.clone()
+          .add(normalizedAxis.clone().multiplyScalar(height))
+          .add(rotatedPerp);
+      },
+      blend
+    );
+  }
+
+  /**
+   * Reset hair geometry to original positions
+   */
+  resetHairGeometry(objectName: string): boolean {
+    const object = this.model?.getObjectByName(objectName);
+    if (!object || !(object as THREE.Mesh).isMesh) return false;
+
+    const mesh = object as THREE.Mesh;
+    const geometry = mesh.geometry;
+    const positionAttr = geometry.attributes.position;
+
+    if (!positionAttr || !geometry.userData.originalPositions) return false;
+
+    const originalPositions = geometry.userData.originalPositions as Float32Array;
+    positionAttr.array.set(originalPositions);
+    positionAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+    return true;
+  }
+
+  /**
+   * Apply custom vertex shader displacement to hair
+   * Useful for GPU-accelerated hair effects
+   */
+  applyHairVertexShader(
+    objectName: string,
+    shaderCode: string
+  ): boolean {
+    const object = this.model?.getObjectByName(objectName);
+    if (!object || !(object as THREE.Mesh).isMesh) return false;
+
+    const mesh = object as THREE.Mesh;
+
+    // Store original material
+    if (!mesh.userData.originalMaterial) {
+      mesh.userData.originalMaterial = mesh.material;
+    }
+
+    // Create custom shader material
+    const material = mesh.material as THREE.MeshStandardMaterial;
+
+    // Clone material and add custom vertex shader
+    const customMaterial = material.clone();
+    customMaterial.onBeforeCompile = (shader) => {
+      // Inject custom vertex shader code
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        shaderCode + '\n#include <begin_vertex>'
+      );
+    };
+
+    mesh.material = customMaterial;
+    return true;
+  }
+
   // ========================================
   // End Hair & Eyebrow Control
   // ========================================
