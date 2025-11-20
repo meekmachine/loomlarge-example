@@ -111,7 +111,7 @@ export class HairService {
           color: state.outlineColor,
           opacity: state.outlineOpacity,
         },
-        visible: partState?.visible,
+        visible: partState?.visible ?? true,  // Default to visible if no part state
         scale: partState?.scale,
         position: partState?.position,
       };
