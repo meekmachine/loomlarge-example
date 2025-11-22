@@ -8,11 +8,17 @@ import { AnimationScheduler as Scheduler } from './animationScheduler';
 const clamp01 = (v:number) => Math.min(1, Math.max(0, v));
 const isNum = (s: string) => /^\d+$/.test(s);
 
-function normalize(sn: any): Snippet & { curves: Record<string, Array<{ time:number; intensity:number }>> } {
+type NormalizedCurvePoint = { time:number; intensity:number; inherit?: boolean };
+
+function normalize(sn: any): Snippet & { curves: Record<string, NormalizedCurvePoint[]> } {
   if (sn && sn.curves) {
-    const curves: Record<string, Array<{ time:number; intensity:number }>> = {};
+    const curves: Record<string, NormalizedCurvePoint[]> = {};
     Object.entries<any[]>(sn.curves).forEach(([key, arr]) => {
-      curves[key] = arr.map((k:any) => ({ time: k.time ?? k.t ?? 0, intensity: k.intensity ?? k.v ?? 0 }));
+      curves[key] = arr.map((k:any) => ({
+        time: k.time ?? k.t ?? 0,
+        intensity: k.intensity ?? k.v ?? 0,
+        inherit: !!k.inherit
+      }));
     });
     return {
       name: sn.name ?? `sn_${Date.now()}`,
@@ -24,9 +30,15 @@ function normalize(sn: any): Snippet & { curves: Record<string, Array<{ time:num
       curves
     } as any;
   }
-  const curves: Record<string, Array<{ time:number; intensity:number }>> = {};
-  (sn.au ?? []).forEach((k:any) => { const key = String(k.id); (curves[key] ||= []).push({ time: k.t ?? k.time ?? 0, intensity: k.v ?? k.intensity ?? 0 }); });
-  (sn.viseme ?? []).forEach((k:any) => { const key = String(k.key); (curves[key] ||= []).push({ time: k.t ?? k.time ?? 0, intensity: k.v ?? k.intensity ?? 0 }); });
+  const curves: Record<string, NormalizedCurvePoint[]> = {};
+  (sn.au ?? []).forEach((k:any) => {
+    const key = String(k.id);
+    (curves[key] ||= []).push({ time: k.t ?? k.time ?? 0, intensity: k.v ?? k.intensity ?? 0, inherit: !!k.inherit });
+  });
+  (sn.viseme ?? []).forEach((k:any) => {
+    const key = String(k.key);
+    (curves[key] ||= []).push({ time: k.t ?? k.time ?? 0, intensity: k.v ?? k.intensity ?? 0, inherit: !!k.inherit });
+  });
   Object.values(curves).forEach(arr => arr.sort((a,b)=>a.time-b.time));
   return { name: sn.name ?? `sn_${Date.now()}`, loop: !!sn.loop, snippetCategory: sn.snippetCategory ?? 'default', snippetPriority: sn.snippetPriority ?? 0, snippetPlaybackRate: sn.snippetPlaybackRate ?? 1, snippetIntensityScale: sn.snippetIntensityScale ?? 1, curves } as any;
 }
@@ -121,11 +133,13 @@ function preloadSnippets() {
     const emotionModules = import.meta.glob('./snippets/emotion/*.json', { eager: true });
     const speakingModules = import.meta.glob('./snippets/speaking/*.json', { eager: true });
     const visemeModules = import.meta.glob('./snippets/visemes/*.json', { eager: true });
+    const eyeHeadTrackingModules = import.meta.glob('./snippets/eyeHeadTracking/*.json', { eager: true });
 
     const config = [
       ['emotionAnimationsList', emotionModules],
       ['speakingAnimationsList', speakingModules],
-      ['visemeAnimationsList', visemeModules]
+      ['visemeAnimationsList', visemeModules],
+      ['eyeHeadTrackingAnimationsList', eyeHeadTrackingModules]
     ] as const;
 
     config.forEach(([storeKey, modules]) => {
@@ -146,7 +160,7 @@ function preloadSnippets() {
   } catch (e) {
     // If import.meta.glob is not available, just ensure the lists exist
     console.warn('[animationService] Could not preload snippets:', e);
-    const categories = ['emotionAnimationsList', 'speakingAnimationsList', 'visemeAnimationsList'];
+    const categories = ['emotionAnimationsList', 'speakingAnimationsList', 'visemeAnimationsList', 'eyeHeadTrackingAnimationsList'];
     categories.forEach(cat => {
       if (!localStorage.getItem(cat)) {
         localStorage.setItem(cat, JSON.stringify([]));
@@ -339,4 +353,3 @@ export function createAnimationService(host: HostCaps){
   (window as any).anim = api;
   return api;
 }
-

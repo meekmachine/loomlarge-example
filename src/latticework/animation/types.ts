@@ -6,7 +6,12 @@ import type { Engine, HostCaps } from '../../engine/EngineThree.types';
 export type { Engine, HostCaps };
 
 // ---------- Core curve types ----------
-export type CurvePoint = { time: number; intensity: number };
+export type CurvePoint = {
+  time: number;
+  intensity: number;
+  /** When true, the animation agency re-seeds this keyframe with the current AU value each time the snippet (re)starts. */
+  inherit?: boolean;
+};
 export type CurvesMap = Record<string, CurvePoint[]>;
 
 // ---------- Snippet (authoring form) ----------
@@ -86,8 +91,8 @@ export interface LoadAnimationEvent {
   type: 'LOAD_ANIMATION';
   data?: Partial<NormalizedSnippet> & Partial<Snippet> & {
     curves?: Record<string, Array<
-      | { time: number; intensity: number }
-      | { t?: number; v?: number; time?: number; intensity?: number }
+      | { time: number; intensity: number; inherit?: boolean }
+      | { t?: number; v?: number; time?: number; intensity?: number; inherit?: boolean }
     >>;
   };
 }

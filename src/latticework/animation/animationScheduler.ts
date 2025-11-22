@@ -1,5 +1,5 @@
 import type { Snippet, HostCaps, ScheduleOpts } from './types';
-import { VISEME_KEYS } from '../../engine/arkit/shapeDict';
+import { VISEME_KEYS, COMPOSITE_ROTATIONS } from '../../engine/arkit/shapeDict';
 
 type RuntimeSched = { name: string; startsAt: number; offset: number; enabled: boolean };
 
@@ -33,13 +33,16 @@ const normalizeIntensity = (value: number): number => {
   return value > 1 ? value / 100 : value;
 };
 
-export function normalize(sn: any): Snippet & { curves: Record<string, Array<{ time: number; intensity: number }>> } {
+type SchedulerCurvePoint = { time: number; intensity: number; inherit?: boolean };
+
+export function normalize(sn: any): Snippet & { curves: Record<string, SchedulerCurvePoint[]> } {
   if (sn && sn.curves) {
-    const curves: Record<string, Array<{ time: number; intensity: number }>> = {};
+    const curves: Record<string, SchedulerCurvePoint[]> = {};
     Object.entries<any[]>(sn.curves).forEach(([key, arr]) => {
       curves[key] = arr.map((k: any) => ({
         time: k.time ?? k.t ?? 0,
-        intensity: normalizeIntensity(k.intensity ?? k.v ?? 0)
+        intensity: normalizeIntensity(k.intensity ?? k.v ?? 0),
+        inherit: !!k.inherit
       }));
     });
     return {
@@ -54,19 +57,21 @@ export function normalize(sn: any): Snippet & { curves: Record<string, Array<{ t
     } as any;
   }
 
-  const curves: Record<string, Array<{ time: number; intensity: number }>> = {};
+  const curves: Record<string, SchedulerCurvePoint[]> = {};
   (sn.au ?? []).forEach((k: any) => {
     const key = String(k.id);
     (curves[key] ||= []).push({
       time: k.t ?? k.time ?? 0,
-      intensity: normalizeIntensity(k.v ?? k.intensity ?? 0)
+      intensity: normalizeIntensity(k.v ?? k.intensity ?? 0),
+      inherit: !!k.inherit
     });
   });
   (sn.viseme ?? []).forEach((k: any) => {
     const key = String(k.key);
     (curves[key] ||= []).push({
       time: k.t ?? k.time ?? 0,
-      intensity: normalizeIntensity(k.v ?? k.intensity ?? 0)
+      intensity: normalizeIntensity(k.v ?? k.intensity ?? 0),
+      inherit: !!k.inherit
     });
   });
   Object.values(curves).forEach(arr => arr.sort((a, b) => a.time - b.time));
@@ -83,7 +88,7 @@ export function normalize(sn: any): Snippet & { curves: Record<string, Array<{ t
   } as any;
 }
 
-function sampleAt(arr: Array<{ time: number; intensity: number }>, t: number) {
+function sampleAt(arr: SchedulerCurvePoint[], t: number) {
   if (!arr.length) return 0;
   if (t <= arr[0].time) return arr[0].intensity;
   if (t >= arr[arr.length - 1].time) return arr[arr.length - 1].intensity;
@@ -113,6 +118,8 @@ export class AnimationScheduler {
   private ended = new Set<string>();
   /** Track current AU values for smooth continuity when scheduling new snippets */
   private currentValues = new Map<string, number>();
+  /** Track last sampled local times per snippet to detect loop wrap events. */
+  private loopLocalTimes = new Map<any, number>();
   /** Detect and handle natural snippet completions (non-looping). Uses wall-clock anchoring. */
   private checkCompletions(tPlay: number) {
     const snippets = this.currentSnippets();
@@ -169,7 +176,7 @@ export class AnimationScheduler {
   }
 
   private currentSnippets() {
-    return this.machine.getSnapshot().context.animations as any[] as Array<Snippet & { curves: Record<string, Array<{ time: number; intensity: number }>> }>;
+    return this.machine.getSnapshot().context.animations as any[] as Array<Snippet & { curves: Record<string, SchedulerCurvePoint[]> }>;
   }
 
   /** Calculate duration from keyframes - find the latest keyframe time across all curves */
@@ -184,7 +191,7 @@ export class AnimationScheduler {
     return this.sched.get(snName)!;
   }
 
-  private buildTargetMap(snippets: Array<Snippet & { curves: Record<string, Array<{ time: number; intensity: number }>> }>, tPlay: number, ignorePlayingState = false) {
+  private buildTargetMap(snippets: Array<Snippet & { curves: Record<string, SchedulerCurvePoint[]> }>, tPlay: number, ignorePlayingState = false) {
     const targets = new Map<string, { v: number; pri: number; durMs: number; category: string }>();
     const now = this.now();
 
@@ -218,6 +225,8 @@ export class AnimationScheduler {
         // Non-looping: clamp to [0, dur] and hold at end
         local = Math.min(dur, Math.max(0, local));
       }
+
+      this.handleLoopContinuity(sn, local);
 
       for (const [curveId, arr] of Object.entries(sn.curves || {})) {
         // Sample the curve at the current local time
@@ -291,6 +300,162 @@ export class AnimationScheduler {
     return targets;
   }
 
+  /**
+   * Apply targets using continuum-aware processing for composite bones.
+   * Detects AU pairs that form continuums (e.g., eyes left/right, head up/down)
+   * and calls the appropriate engine continuum methods instead of individual setAU.
+   */
+  private applyContinuumTargets(targets: Map<string, { v: number; pri: number; durMs: number; category: string }>) {
+    const processedAUs = new Set<string>();
+    const processedContinuums = new Set<string>(); // Track which continuums we've already called
+
+    // Process each composite rotation definition from shapeDict
+    for (const composite of COMPOSITE_ROTATIONS) {
+      const { node, pitch, yaw, roll } = composite;
+
+      // Process each axis (pitch, yaw, roll) for this node
+      const axes: Array<{ name: 'pitch' | 'yaw' | 'roll'; config: typeof pitch }> = [
+        { name: 'pitch', config: pitch },
+        { name: 'yaw', config: yaw },
+        { name: 'roll', config: roll },
+      ];
+
+      for (const { name: axisName, config } of axes) {
+        if (!config || !config.negative || !config.positive) continue;
+
+        const negAU = String(config.negative);
+        const posAU = String(config.positive);
+        const negValue = targets.get(negAU)?.v ?? 0;
+        const posValue = targets.get(posAU)?.v ?? 0;
+
+        // If either AU is active, calculate continuum value and call the appropriate method
+        if (negValue > 0 || posValue > 0) {
+          // Continuum value: -1 (negative) to +1 (positive)
+          const continuumValue = posValue - negValue;
+
+          // Determine which engine method to call based on node and axis
+          const methodName = this.getContinuumMethodName(node, axisName);
+          if (methodName) {
+            // Create a unique key for this continuum to avoid duplicate calls
+            // (e.g., both EYE_L and EYE_R map to setEyesHorizontal, only call once)
+            const continuumKey = `${methodName}:${negAU}-${posAU}`;
+
+            if (!processedContinuums.has(continuumKey) && this.host[methodName]) {
+              this.host[methodName](continuumValue);
+              console.log(`[Scheduler] Continuum: ${node}.${axisName} = ${continuumValue.toFixed(2)} (AU${negAU}=${negValue.toFixed(2)}, AU${posAU}=${posValue.toFixed(2)}) → ${methodName}()`);
+              processedContinuums.add(continuumKey);
+            }
+          }
+
+          // Mark these AUs as processed so we don't apply them individually
+          processedAUs.add(negAU);
+          processedAUs.add(posAU);
+
+          // Track current values for continuity
+          this.currentValues.set(negAU, negValue);
+          this.currentValues.set(posAU, posValue);
+        }
+      }
+    }
+
+    // Apply remaining AUs that aren't part of continuum pairs
+    targets.forEach((entry, curveId) => {
+      if (processedAUs.has(curveId)) return; // Skip continuum pairs already processed
+
+      const v = entry.v;
+      // Track current value for continuity
+      this.currentValues.set(curveId, v);
+
+      if (isNum(curveId)) {
+        (this.host.transitionAU ?? this.host.applyAU)(parseInt(curveId, 10), v, 120);
+      } else {
+        (this.host.transitionMorph ?? this.host.setMorph)(curveId, v, 80);
+      }
+    });
+  }
+
+  /** Apply morph targets that correspond to visemes so continuum logic only sees AU targets. */
+  private applyVisemeTargets(targets: Map<string, { v: number; pri: number; durMs: number; category: string }>) {
+    const processedIds: string[] = [];
+
+    targets.forEach((entry, curveId) => {
+      const isVisemeCategory = entry.category === 'visemeSnippet' || entry.category === 'combined';
+      if (!isVisemeCategory) return;
+
+      const numericId = Number(curveId);
+      const numericIsViseme = !Number.isNaN(numericId) && numericId >= 0 && numericId < VISEME_KEYS.length;
+      const nameMatchIndex = VISEME_KEYS.indexOf(curveId);
+      const morphName = numericIsViseme
+        ? VISEME_KEYS[numericId]
+        : (nameMatchIndex >= 0 ? VISEME_KEYS[nameMatchIndex] : null);
+
+      if (!morphName) return; // Combined snippets can carry AU ids too - leave them for continuum logic
+
+      const v = clamp01(entry.v);
+      (this.host.transitionMorph ?? this.host.setMorph)?.(morphName, v, entry.durMs);
+      this.currentValues.set(curveId, v);
+      processedIds.push(curveId);
+    });
+
+    processedIds.forEach(id => targets.delete(id));
+  }
+
+  /** Detect loop wrap events and refresh inherited keyframes so loops resume from the latest AU values. */
+  private handleLoopContinuity(sn: Snippet & { curves: Record<string, SchedulerCurvePoint[]> }, localTime: number) {
+    const prev = this.loopLocalTimes.get(sn);
+
+    if (sn.loop && prev !== undefined && localTime + 1e-4 < prev) {
+      this.reseedInheritedKeyframes(sn);
+    }
+
+    this.loopLocalTimes.set(sn, localTime);
+  }
+
+  private reseedInheritedKeyframes(sn: Snippet & { curves: Record<string, SchedulerCurvePoint[]> }) {
+    Object.entries(sn.curves || {}).forEach(([curveId, arr]) => {
+      const first = arr?.[0];
+      if (!first || !first.inherit) return;
+      const current = this.currentValues.get(curveId) ?? first.intensity ?? 0;
+      if (Math.abs((first.intensity ?? 0) - current) > 0.001) {
+        console.log(`[Scheduler] Loop continuity: ${sn.name} AU ${curveId} resumes from ${current.toFixed(3)}`);
+      }
+      first.intensity = current;
+    });
+  }
+
+  /**
+   * Get the engine method name for a given composite node and axis.
+   * Maps node+axis combinations to EngineThree continuum helper methods.
+   */
+  private getContinuumMethodName(node: string, axis: 'pitch' | 'yaw' | 'roll'): string | null {
+    // Eyes
+    if (node === 'EYE_L' || node === 'EYE_R') {
+      if (axis === 'yaw') return 'setEyesHorizontal';
+      if (axis === 'pitch') return 'setEyesVertical';
+    }
+
+    // Head
+    if (node === 'HEAD') {
+      if (axis === 'yaw') return 'setHeadHorizontal';
+      if (axis === 'pitch') return 'setHeadVertical';
+      if (axis === 'roll') return 'setHeadRoll';
+    }
+
+    // Jaw
+    if (node === 'JAW') {
+      if (axis === 'yaw') return 'setJawHorizontal';
+      // Jaw pitch is handled differently (jaw drop uses multiple AUs)
+    }
+
+    // Tongue
+    if (node === 'TONGUE') {
+      if (axis === 'yaw') return 'setTongueHorizontal';
+      if (axis === 'pitch') return 'setTongueVertical';
+    }
+
+    return null;
+  }
+
   private tick = () => {
     if (!this.playing) {
       this.rafId = null;
@@ -301,13 +466,13 @@ export class AnimationScheduler {
     // Handle natural completions before applying targets
     this.checkCompletions(tPlay);
     const targets = this.buildTargetMap(this.currentSnippets(), tPlay);
-    targets.forEach((entry, curveId) => {
-      const v = entry.v;
-      // Track current value for continuity
-      this.currentValues.set(curveId, v);
-      if (isNum(curveId)) (this.host.transitionAU ?? this.host.applyAU)(parseInt(curveId, 10), v, 120);
-      else (this.host.transitionMorph ?? this.host.setMorph)(curveId, v, 80);
-    });
+
+    // Apply viseme morphs before AU continuum processing so they don't get mistaken for AUs
+    this.applyVisemeTargets(targets);
+
+    // Apply continuum-aware processing for composite bones (eyes, head, jaw, tongue)
+    this.applyContinuumTargets(targets);
+
     this.rafId = typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame(this.tick) : null;
   };
 
@@ -342,27 +507,32 @@ export class AnimationScheduler {
    */
   private applyContinuity(snippet: Snippet): Snippet {
     const curves = (snippet as any).curves || {};
-    const continuousCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
+    const continuousCurves: Record<string, SchedulerCurvePoint[]> = {};
 
-    for (const [auId, keyframes] of Object.entries<Array<{ time: number; intensity: number }>>(curves)) {
+    for (const [auId, keyframes] of Object.entries<SchedulerCurvePoint[]>(curves)) {
       if (!keyframes || keyframes.length === 0) {
         continuousCurves[auId] = keyframes;
         continue;
       }
 
       // Clone the keyframe array to avoid mutating the original
-      const newKeyframes = [...keyframes];
+      const newKeyframes = keyframes.map(kf => ({ ...kf }));
 
       // If first keyframe is at time 0, replace its intensity with current value
-      if (newKeyframes[0].time === 0) {
+      if (newKeyframes[0].time === 0 || newKeyframes[0].inherit) {
         const currentValue = this.currentValues.get(auId) ?? 0;
+        const prevValue = newKeyframes[0].intensity ?? 0;
 
-        // Only apply continuity if current value is different from keyframe value
-        // This avoids unnecessary logging for neutral positions
-        if (Math.abs(currentValue - newKeyframes[0].intensity) > 0.001) {
-          console.log(`[Scheduler] Continuity: ${snippet.name} AU ${auId} starts from ${currentValue.toFixed(3)} (was ${newKeyframes[0].intensity.toFixed(3)})`);
-          newKeyframes[0] = { time: 0, intensity: currentValue };
+        if (Math.abs(currentValue - prevValue) > 0.001) {
+          console.log(`[Scheduler] Continuity: ${snippet.name} AU ${auId} starts from ${currentValue.toFixed(3)} (was ${prevValue.toFixed(3)})`);
         }
+
+        newKeyframes[0] = {
+          ...newKeyframes[0],
+          time: 0,
+          intensity: currentValue,
+          inherit: newKeyframes[0].inherit
+        };
       }
 
       continuousCurves[auId] = newKeyframes;
@@ -511,11 +681,11 @@ export class AnimationScheduler {
     console.log('[Scheduler] flushOnce() targets:', targets.size);
     targets.forEach((entry, curveId) => {
       console.log('  -', curveId, '=', (entry.v ?? 0).toFixed(3), 'pri:', entry.pri, 'dur:', (entry.durMs ?? 0).toFixed(1), 'ms');
-      // Clamp AU values to [0,1]
-      const v = clamp01(entry.v);
-      // All curve IDs are AU numbers (as strings)
-      (this.host.transitionAU ?? this.host.applyAU)(parseInt(curveId, 10), v, entry.durMs);
     });
+
+    // Apply using the same flow as realtime playback so debugging reflects true behavior
+    this.applyVisemeTargets(targets);
+    this.applyContinuumTargets(targets);
   }
 
   /** Drive the scheduler from an external clock (preferred, VISOS parity). */
@@ -567,28 +737,12 @@ export class AnimationScheduler {
     });
 
     const targets = this.buildTargetMap(snippets, tPlay);
-    targets.forEach((entry, curveId) => {
-      // Clamp values to [0,1]
-      const v = clamp01(entry.v);
 
-      // Handle viseme snippets and combined snippets differently - map index to viseme morph name
-      if (entry.category === 'visemeSnippet' || entry.category === 'combined') {
-        const numericId = parseInt(curveId, 10);
+    // Apply viseme morph targets first. Remaining entries are AU/morph keys for continuum logic.
+    this.applyVisemeTargets(targets);
 
-        // Check if this is a viseme index (0-14) or an AU (26, etc.)
-        if (!isNaN(numericId) && numericId >= 0 && numericId < VISEME_KEYS.length) {
-          // It's a viseme - apply as morph
-          const morphName = VISEME_KEYS[numericId];
-          (this.host.transitionMorph ?? this.host.setMorph)?.(morphName, v, entry.durMs);
-        } else if (!isNaN(numericId)) {
-          // It's an AU (like 26 for jaw) - apply as AU
-          (this.host.transitionAU ?? this.host.applyAU)(numericId, v, entry.durMs);
-        }
-      } else {
-        // AU snippets: apply as Action Unit ID
-        (this.host.transitionAU ?? this.host.applyAU)(parseInt(curveId, 10), v, entry.durMs);
-      }
-    });
+    // Apply continuum-aware processing for AU targets (eyes, head, jaw, tongue, etc.)
+    this.applyContinuumTargets(targets);
   }
 
   /** Return playing state for external checks */

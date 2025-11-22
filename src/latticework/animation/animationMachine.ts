@@ -8,7 +8,7 @@ import type {
 } from './types';
 
 // ---------- helpers ----------
-function normalizeCurves(input?: Record<string, Array<CurvePoint | { t?: number; v?: number; time?: number; intensity?: number }>>) {
+function normalizeCurves(input?: Record<string, Array<CurvePoint | { t?: number; v?: number; time?: number; intensity?: number; inherit?: boolean }>>) {
   const out: Record<string, CurvePoint[]> = {};
   if (!input) return out;
   for (const [key, arr] of Object.entries(input)) {
@@ -16,6 +16,7 @@ function normalizeCurves(input?: Record<string, Array<CurvePoint | { t?: number;
     const norm = safe.map((k: any) => ({
       time: typeof k.time === 'number' ? k.time : (typeof k.t === 'number' ? k.t : 0),
       intensity: typeof k.intensity === 'number' ? k.intensity : (typeof k.v === 'number' ? k.v : 0),
+      inherit: !!k.inherit,
     }));
     norm.sort((a, b) => a.time - b.time);
     out[key] = norm;
