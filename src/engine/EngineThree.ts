@@ -1476,6 +1476,21 @@ export class EngineThree {
   }
 
   /**
+   * Get available hair morph targets from a hair object
+   * Returns array of morph target names
+   */
+  getHairMorphTargets(objectName: string): string[] {
+    const object = this.model?.getObjectByName(objectName);
+    if (!object || !(object as THREE.Mesh).isMesh) return [];
+
+    const mesh = object as THREE.Mesh;
+    const dict = (mesh as any).morphTargetDictionary;
+    if (!dict) return [];
+
+    return Object.keys(dict);
+  }
+
+  /**
    * Apply vertex displacement to hair geometry
    * Uses a displacement function that takes vertex position and returns new position
    */

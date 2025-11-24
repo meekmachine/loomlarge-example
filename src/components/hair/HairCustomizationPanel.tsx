@@ -17,12 +17,17 @@ type Props = {
 export function HairCustomizationPanel({ hairService }: Props) {
   const [state, setState] = useState<HairState | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [availableMorphs, setAvailableMorphs] = useState<string[]>([]);
 
   useEffect(() => {
     if (!hairService) return;
 
     // Get initial state
     setState(hairService.getState());
+
+    // Get available hair morphs
+    const morphs = hairService.getAvailableHairMorphs();
+    setAvailableMorphs(morphs);
 
     // Subscribe to updates
     const unsubscribe = hairService.subscribe((newState) => {
@@ -136,6 +141,10 @@ export function HairCustomizationPanel({ hairService }: Props) {
 
   const handleReset = () => {
     hairService.send({ type: 'RESET_TO_DEFAULT' });
+  };
+
+  const handleAnimateHairMorph = (morphKey: string, value: number) => {
+    hairService.animateHairMorph(morphKey, value, 300);
   };
 
   const colorPresetKeys = Object.keys(HAIR_COLOR_PRESETS);
@@ -386,6 +395,36 @@ export function HairCustomizationPanel({ hairService }: Props) {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* HAIR ANIMATION SECTION */}
+          {availableMorphs.length > 0 && (
+            <div className="section">
+              <h4 className="section-title">Hair Animation</h4>
+              <p className="text-muted" style={{ fontSize: '0.9em', marginBottom: '10px' }}>
+                Animate hair shape keys (morph targets)
+              </p>
+              <div className="morphs-list">
+                {availableMorphs.map((morphKey) => (
+                  <div key={morphKey} className="morph-item">
+                    <label style={{ fontSize: '0.85em' }}>{morphKey}</label>
+                    <div className="slider-row">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        defaultValue="0"
+                        onChange={(e) =>
+                          handleAnimateHairMorph(morphKey, parseFloat(e.target.value))
+                        }
+                        className="slider"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

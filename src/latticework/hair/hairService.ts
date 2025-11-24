@@ -123,6 +123,49 @@ export class HairService {
   }
 
   /**
+   * Animate hair using morph targets (shape keys)
+   * Hair has 14 shape keys that can be animated for physics-based movement
+   */
+  animateHairMorph(morphKey: string, targetValue: number, durationMs: number = 300) {
+    if (!this.engine) {
+      console.warn('[HairService] No engine available for hair animation');
+      return;
+    }
+
+    // Delegate to engine's morph animation system
+    this.engine.transitionMorph(morphKey, targetValue, durationMs);
+  }
+
+  /**
+   * Set hair morph instantly (no transition)
+   */
+  setHairMorph(morphKey: string, value: number) {
+    if (!this.engine) {
+      console.warn('[HairService] No engine available for hair morph');
+      return;
+    }
+
+    this.engine.setMorph(morphKey, value);
+  }
+
+  /**
+   * Get list of available hair morphs from the registered hair objects
+   * Returns morph target dictionary keys from the first hair mesh found
+   */
+  getAvailableHairMorphs(): string[] {
+    if (!this.engine) {
+      return [];
+    }
+
+    // Find a hair mesh (not eyebrow) from our registered objects
+    const hairObj = this.objects.find(obj => !obj.isEyebrow && obj.isMesh);
+    if (!hairObj) return [];
+
+    // Use engine's public method to get morph targets
+    return this.engine.getHairMorphTargets(hairObj.name);
+  }
+
+  /**
    * Cleanup
    */
   dispose() {

@@ -159,6 +159,26 @@ Hair meshes have **14 shape keys** for:
 - Physics-based deformation
 - Style variations
 
+**Animation Implementation:**
+Hair can be animated using the existing morph target system:
+```typescript
+// Via HairService (recommended)
+hairService.animateHairMorph(morphKey, targetValue, durationMs);
+hairService.setHairMorph(morphKey, value);
+
+// Via EngineThree directly
+engine.transitionMorph(morphKey, targetValue, durationMs);
+engine.setMorph(morphKey, value);
+```
+
+**Available Methods:**
+- `HairService.animateHairMorph()` - Smoothly animate to target value
+- `HairService.setHairMorph()` - Instantly set morph value
+- `HairService.getAvailableHairMorphs()` - Get list of available shape keys
+
+**UI Controls:**
+Hair animation controls are available in `HairCustomizationPanel` under the "Hair Animation" section
+
 ### Hair Detection
 Hair objects are detected using pattern matching in `shapeDict.ts`:
 
