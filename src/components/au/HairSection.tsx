@@ -24,12 +24,17 @@ interface HairSectionProps {
 
 export default function HairSection({ hairService, disabled = false }: HairSectionProps) {
   const [state, setState] = useState<HairState | null>(null);
+  const [availableMorphs, setAvailableMorphs] = useState<string[]>([]);
 
   useEffect(() => {
     if (!hairService) return;
 
     // Get initial state
     setState(hairService.getState());
+
+    // Get available hair morphs
+    const morphs = hairService.getAvailableHairMorphs();
+    setAvailableMorphs(morphs);
 
     // Subscribe to updates
     const unsubscribe = hairService.subscribe((newState) => {
@@ -141,6 +146,10 @@ export default function HairSection({ hairService, disabled = false }: HairSecti
 
   const handleReset = () => {
     hairService.send({ type: 'RESET_TO_DEFAULT' });
+  };
+
+  const handleAnimateHairMorph = (morphKey: string, value: number) => {
+    hairService.animateHairMorph(morphKey, value, 300);
   };
 
   const colorPresetKeys = Object.keys(HAIR_COLOR_PRESETS);
@@ -430,6 +439,42 @@ export default function HairSection({ hairService, disabled = false }: HairSecti
                   </HStack>
                 );
               })}
+            </VStack>
+          </Box>
+        )}
+
+        {/* HAIR ANIMATION SECTION */}
+        {availableMorphs.length > 0 && (
+          <Box borderTop="1px solid" borderColor="whiteAlpha.200" pt={4}>
+            <Text fontSize="sm" fontWeight="bold" color="brand.300" mb={2}>
+              HAIR ANIMATION
+            </Text>
+            <Text fontSize="xs" color="gray.400" mb={3}>
+              Animate hair shape keys (morph targets)
+            </Text>
+            <VStack align="stretch" spacing={3}>
+              {availableMorphs.map((morphKey) => (
+                <VStack key={morphKey} align="stretch" spacing={1}>
+                  <HStack justify="space-between">
+                    <Text fontSize="xs" color="gray.50">{morphKey}</Text>
+                    <Text fontSize="xs" color="gray.300">0.0</Text>
+                  </HStack>
+                  <Slider
+                    defaultValue={0}
+                    onChange={(value) => handleAnimateHairMorph(morphKey, value)}
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    isDisabled={disabled}
+                    colorScheme="cyan"
+                  >
+                    <SliderTrack>
+                      <SliderFilledTrack />
+                    </SliderTrack>
+                    <SliderThumb />
+                  </Slider>
+                </VStack>
+              ))}
             </VStack>
           </Box>
         )}
