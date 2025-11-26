@@ -12,13 +12,14 @@ import {
 } from '@chakra-ui/react';
 import { AUInfo, AU_MIX_DEFAULTS } from '../../engine/arkit/shapeDict';
 import { EngineThree } from '../../engine/EngineThree';
+import { EngineFour } from '../../engine/EngineFour';
 
 interface ContinuumSliderProps {
   negativeAU: AUInfo;
   positiveAU: AUInfo;
   value: number; // -1 to 1
   onChange: (value: number) => void;
-  engine?: EngineThree; // Optional: for morph/bone blend control
+  engine?: EngineThree | EngineFour; // Optional: for morph/bone blend control
   showBlendSlider?: boolean; // Whether to show the morph/bone blend slider
   disabled?: boolean;
 }

@@ -4,9 +4,10 @@ import { AddIcon } from '@chakra-ui/icons';
 import DockableAccordionItem from './DockableAccordionItem';
 import { CurveEditor } from '../CurveEditor';
 import { EngineThree } from '../../engine/EngineThree';
+import { EngineFour } from '../../engine/EngineFour';
 import { VISEME_KEYS } from '../../engine/arkit/shapeDict';
 import type { NormalizedSnippet } from '../../latticework/animation/types';
-import { useThreeState } from '../../context/threeContext';
+import { useEngineState } from '../../context/engineContext';
 
 type Keyframe = { time: number; value: number };
 
@@ -17,7 +18,7 @@ type SnippetCurveData = {
 };
 
 interface VisemeSectionProps {
-  engine?: EngineThree;
+  engine?: EngineThree | EngineFour | null;
   visemeStates: Record<string, number>;
   onVisemeChange: (key: string, value: number) => void;
   disabled?: boolean;
@@ -39,7 +40,7 @@ export default function VisemeSection({
   useCurveEditor = false,
   visemeSnippetCurves = {}
 }: VisemeSectionProps) {
-  const { anim } = useThreeState();
+  const { anim } = useEngineState();
   const toast = useToast();
   const [tooltipStates, setTooltipStates] = useState<Record<string, boolean>>({});
   const [jawRatios, setJawRatios] = useState<Record<string, number>>({});

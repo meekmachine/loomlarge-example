@@ -15,6 +15,7 @@ export type CharacterReady = {
   scene: THREE.Scene;
   model: THREE.Object3D;
   meshes: THREE.Mesh[]; // meshes with morph targets (for facslib)
+  animations?: THREE.AnimationClip[];
   hairService?: HairService; // hair customization service
 };
 
@@ -227,6 +228,8 @@ export default function CharacterGLBScene({
           gltf => {
             // Clean up blob URL after loading
             URL.revokeObjectURL(blobUrl);
+            console.log('[CharacterGLBScene] GLTF keys:', Object.keys(gltf), 'animations:', gltf.animations?.length ?? 0, gltf);
+            console.log('[CharacterGLBScene] Animations object:', gltf.animations);
         model = gltf.scene;
         scene.add(model);
 
@@ -308,31 +311,46 @@ export default function CharacterGLBScene({
         console.log(`Total hair objects found: ${hairObjects.length}`);
         console.groupEnd();
 
-        // Initialize hair customization service if hair objects were found
-        if (hairObjects.length > 0) {
+        // Initialize hair customization service if hair objects were found.
+        // Hair registration is deferred until after engine.onReady runs (via parent onReady callback)
+        // to avoid racing the EngineThree model assignment.
+        const initializeHairService = () => {
+          if (!hairObjects.length) {
+            console.warn('[CharacterGLBScene] ⚠️ No hair objects detected in model');
+            return;
+          }
+
           hairService = new HairService(engine);
-          hairService.registerObjects(hairObjects);
-          console.log('[CharacterGLBScene] ✅ HairService initialized with', hairObjects.length, 'objects');
 
-          // Log available hair morphs for debugging
-          const availableHairMorphs = hairService.getAvailableHairMorphs();
-          console.group('[CharacterGLBScene] 💇 HAIR MORPH TARGETS');
-          console.log(`Found ${availableHairMorphs.length} hair morphs:`, availableHairMorphs);
+          // Defer registration to the next frame so the consuming onReady handler
+          // (App.handleReady) can call engine.onReady and attach the model first.
+          requestAnimationFrame(() => {
+            if (!hairService) return;
 
-          // Log morphs from each hair object for detailed debugging
-          hairObjects.forEach(obj => {
-            if ((obj as THREE.Mesh).isMesh) {
-              const mesh = obj as THREE.Mesh;
-              const dict = (mesh as any).morphTargetDictionary;
-              if (dict) {
-                console.log(`\n${obj.name} morphs (${Object.keys(dict).length}):`, Object.keys(dict));
+            hairService.registerObjects(hairObjects);
+            console.log('[CharacterGLBScene] ✅ HairService initialized with', hairObjects.length, 'objects');
+
+            // Log available hair morphs for debugging
+            const availableHairMorphs = hairService.getAvailableHairMorphs();
+            console.group('[CharacterGLBScene] 💇 HAIR MORPH TARGETS');
+            console.log(`Found ${availableHairMorphs.length} hair morphs:`, availableHairMorphs);
+
+            // Log morphs from each hair object for detailed debugging
+            hairObjects.forEach(obj => {
+              if ((obj as THREE.Mesh).isMesh) {
+                const mesh = obj as THREE.Mesh;
+                const dict = (mesh as any).morphTargetDictionary;
+                if (dict) {
+                  console.log(`\n${obj.name} morphs (${Object.keys(dict).length}):`, Object.keys(dict));
+                }
               }
-            }
+            });
+            console.groupEnd();
           });
-          console.groupEnd();
-        } else {
-          console.warn('[CharacterGLBScene] ⚠️ No hair objects detected in model');
-        }
+        };
+
+        // Start hair service after detection (registration deferred to next frame)
+        initializeHairService();
 
         // Center & scale to a reasonable size
         const box = new THREE.Box3().setFromObject(model);
@@ -392,7 +410,7 @@ export default function CharacterGLBScene({
           loadingTextMesh = null;
         }
 
-        onReady?.({ scene, model, meshes, hairService: hairService || undefined });
+        onReady?.({ scene, model, meshes, animations: gltf.animations, hairService: hairService || undefined });
           },
           (progressEvent) => {
             // Calculate loading progress percentage
@@ -420,6 +438,7 @@ export default function CharacterGLBScene({
           gltf => {
             model = gltf.scene;
             scene.add(model);
+            console.log('[CharacterGLBScene] Fallback GLTF animations:', gltf.animations);
 
             // Hair detection (same as above)
             const hairObjects: THREE.Object3D[] = [];
@@ -432,7 +451,11 @@ export default function CharacterGLBScene({
 
             if (hairObjects.length > 0) {
               hairService = new HairService(engine);
-              hairService.registerObjects(hairObjects);
+              // Defer registration until next frame so engine.onReady can set the model first
+              requestAnimationFrame(() => {
+                if (!hairService) return;
+                hairService.registerObjects(hairObjects);
+              });
             }
 
             // Center & scale
@@ -487,7 +510,7 @@ export default function CharacterGLBScene({
               loadingTextMesh = null;
             }
 
-            onReady?.({ scene, model, meshes, hairService: hairService || undefined });
+            onReady?.({ scene, model, meshes, animations: gltf.animations, hairService: hairService || undefined });
           },
           (progressEvent) => {
             if (progressEvent.lengthComputable) {

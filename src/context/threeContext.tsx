@@ -14,7 +14,7 @@ export type ThreeContextValue = {
   addFrameListener: (callback: (deltaSeconds: number) => void) => () => void;
 };
 
-const ThreeCtx = createContext<ThreeContextValue | null>(null);
+export const ThreeCtx = createContext<ThreeContextValue | null>(null);
 
 export const ThreeProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   // Singletons per provider instance
@@ -153,4 +153,8 @@ export function useThreeState() {
   const ctx = useContext(ThreeCtx);
   if (!ctx) throw new Error('useThreeState must be used within a ThreeProvider');
   return ctx;
+}
+
+export function useThreeOptional() {
+  return useContext(ThreeCtx);
 }

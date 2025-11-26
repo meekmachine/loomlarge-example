@@ -16,6 +16,7 @@ import type { GazeTarget } from './types';
 export interface EyeHeadHostCaps {
   scheduleSnippet: (snippet: any) => string | null;
   removeSnippet: (name: string) => void;
+  onSnippetEnd?: (name: string) => void;
 }
 
 export interface GazeTransitionConfig {
@@ -281,28 +282,29 @@ export class EyeHeadTrackingScheduler {
     positiveAU: string,
     value: number,
     duration: number
-  ): Record<string, Array<{ time: number; intensity: number }>> {
-    const curves: Record<string, Array<{ time: number; intensity: number }>> = {};
+  ): Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> {
+    const curves: Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> = {};
+    const inheritStart = () => ({ time: 0, intensity: 0, inherit: true }); // Seed from current AU to avoid snaps
 
     // ALWAYS schedule BOTH directions for proper transitions
     if (value < 0) {
       // Negative direction (left/down)
       curves[negativeAU] = [
-        { time: 0, intensity: 0 },
+        inheritStart(),
         { time: duration, intensity: Math.abs(value) }
       ];
       curves[positiveAU] = [
-        { time: 0, intensity: 0 },
+        inheritStart(),
         { time: duration, intensity: 0 }
       ];
     } else {
       // Positive direction (right/up)
       curves[negativeAU] = [
-        { time: 0, intensity: 0 },
+        inheritStart(),
         { time: duration, intensity: 0 }
       ];
       curves[positiveAU] = [
-        { time: 0, intensity: 0 },
+        inheritStart(),
         { time: duration, intensity: value }
       ];
     }

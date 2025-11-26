@@ -15,14 +15,15 @@ import {
 } from '@chakra-ui/react';
 import DockableAccordionItem from './DockableAccordionItem';
 import { EngineThree } from '../../engine/EngineThree';
+import { EngineFour } from '../../engine/EngineFour';
 import { createTTSService } from '../../latticework/tts';
 import { createLipSyncService } from '../../latticework/lipsync';
 import type { TTSService } from '../../latticework/tts/ttsService';
 import type { LipSyncServiceAPI } from '../../latticework/lipsync';
-import { useThreeState } from '../../context/threeContext';
+import { useEngineState } from '../../context/engineContext';
 
 interface TTSSectionProps {
-  engine?: EngineThree;
+  engine?: EngineThree | EngineFour | null;
   disabled?: boolean;
 }
 
@@ -49,7 +50,7 @@ interface TTSSectionProps {
  * 6. Smooth return to neutral state after word/speech ends
  */
 export default function TTSSection({ engine, disabled = false }: TTSSectionProps) {
-  const { anim } = useThreeState();
+  const { anim } = useEngineState();
   const [text, setText] = useState('The saddest aspect of life right now is that science gathers knowledge faster than society gathers wisdom.');
   const [rate, setRate] = useState(1.0);
   const [pitch, setPitch] = useState(1.0);

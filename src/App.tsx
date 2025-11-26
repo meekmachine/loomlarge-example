@@ -1,9 +1,9 @@
-import React, { useCallback, useState, useMemo, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useMemo, useEffect } from 'react';
 import CharacterGLBScene from './scenes/CharacterGLBScene';
 import SliderDrawer from './components/SliderDrawer';
 import ModulesMenu from './components/ModulesMenu';
 import Preloader from './components/Preloader';
-import { useThreeState } from './context/threeContext';
+import { useEngineState } from './context/engineContext';
 import { ModulesProvider, useModulesContext } from './context/ModulesContext';
 import { createEyeHeadTrackingService } from './latticework/eyeHeadTracking/eyeHeadTrackingService';
 import { HairService } from './latticework/hair/hairService';
@@ -12,9 +12,10 @@ import './styles.css';
 import { setupGLBCacheDebug } from './utils/glbCacheDebug';
 
 import { AU_TO_MORPHS } from './engine/arkit/shapeDict';
+import { EngineFour } from './engine/EngineFour';
 
 function AppContent() {
-  const { engine, anim } = useThreeState();
+  const { engine, anim } = useEngineState();
   const { setEyeHeadTrackingService } = useModulesContext();
 
   const [auditSummary, setAuditSummary] = useState<{ morphCount:number; totalAUs:number; fullCovered:number; partial:number; zero:number } | null>(null);
@@ -61,8 +62,8 @@ function AppContent() {
   }
 
   const handleReady = useCallback(
-    ({ meshes, model, hairService }: { meshes: any[]; model?: any; hairService?: HairService }) => {
-      engine.onReady({ meshes, model });
+    ({ meshes, model, animations, hairService }: { meshes: any[]; model?: any; animations?: any[]; hairService?: HairService }) => {
+      engine.onReady({ meshes, model, animations });
 
       // Set hair service if available
       if (hairService) {
@@ -153,6 +154,7 @@ function AppContent() {
   // Use BASE_URL for all assets to work with GitHub Pages base path
   const glbSrc = import.meta.env.BASE_URL + "characters/jonathan_new.glb";
   const skyboxUrl = import.meta.env.BASE_URL + "skyboxes/3BR2D07.jpg";
+  const isEngineFour = engine instanceof EngineFour;
 
   return (
     <div className="fullscreen-scene">

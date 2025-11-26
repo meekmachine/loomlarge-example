@@ -13,6 +13,8 @@ export interface CurveEditorProps {
   onChange?: (updated: Keyframe[]) => void;
   currentTime?: number; // current playback position in seconds
   isPlaying?: boolean; // whether this snippet is currently playing
+  valueMin?: number; // minimum value for vertical axis (default 0)
+  valueMax?: number; // maximum value for vertical axis (default 1)
 }
 
 const WIDTH = 400;
@@ -22,8 +24,6 @@ const INNER_W = WIDTH - MARGIN.left - MARGIN.right;
 const INNER_H = HEIGHT - MARGIN.top - MARGIN.bottom;
 const POINT_RADIUS = 7;
 const HIT_RADIUS = 10;
-const VALUE_MIN = 0;
-const VALUE_MAX = 1;
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
@@ -33,12 +33,16 @@ function sortKeyframes(arr: Keyframe[]) {
   return [...arr].sort((a, b) => a.time - b.time);
 }
 
-function valueToY(value: number) {
-  // value 1 at top, 0 at bottom
-  return MARGIN.top + (1 - value) * INNER_H;
+function valueToY(value: number, min: number, max: number) {
+  // value at max sits at top, min at bottom
+  const range = max - min || 1;
+  const norm = (value - min) / range;
+  return MARGIN.top + (1 - norm) * INNER_H;
 }
-function yToValue(y: number) {
-  return clamp(1 - (y - MARGIN.top) / INNER_H, VALUE_MIN, VALUE_MAX);
+function yToValue(y: number, min: number, max: number) {
+  const range = max - min || 1;
+  const norm = 1 - (y - MARGIN.top) / INNER_H;
+  return clamp(norm * range + min, min, max);
 }
 function timeToX(time: number, duration: number) {
   return MARGIN.left + (time / duration) * INNER_W;
@@ -47,14 +51,14 @@ function xToTime(x: number, duration: number) {
   return clamp((x - MARGIN.left) / INNER_W * duration, 0, duration);
 }
 
-function getPath(keyframes: Keyframe[], duration: number) {
+function getPath(keyframes: Keyframe[], duration: number, min: number, max: number) {
   if (!keyframes.length) return '';
   const sorted = sortKeyframes(keyframes);
   let d = '';
   for (let i = 0; i < sorted.length; ++i) {
     const kf = sorted[i];
     const x = timeToX(kf.time, duration);
-    const y = valueToY(kf.value);
+    const y = valueToY(kf.value, min, max);
     if (i === 0) d += `M ${x} ${y}`;
     else d += ` L ${x} ${y}`;
   }
@@ -65,14 +69,16 @@ function nearestKeyframeIdx(
   keyframes: Keyframe[],
   x: number,
   y: number,
-  duration: number
+  duration: number,
+  min: number,
+  max: number
 ): number | null {
   // Returns index of nearest keyframe within HIT_RADIUS px, else null
   let minDist = Infinity, idx = null;
   for (let i = 0; i < keyframes.length; ++i) {
     const kf = keyframes[i];
     const kfx = timeToX(kf.time, duration);
-    const kfy = valueToY(kf.value);
+    const kfy = valueToY(kf.value, min, max);
     const dist = Math.hypot(kfx - x, kfy - y);
     if (dist < HIT_RADIUS && dist < minDist) {
       minDist = dist;
@@ -90,6 +96,8 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
   onChange,
   currentTime = 0,
   isPlaying = false,
+  valueMin = 0,
+  valueMax = 1,
 }) => {
   // Local state for drag interaction
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -107,7 +115,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     const rect = svgRef.current.getBoundingClientRect();
     const svgX = e.clientX - rect.left;
     const svgY = e.clientY - rect.top;
-    const idx = nearestKeyframeIdx(editingKeyframes, svgX, svgY, duration);
+    const idx = nearestKeyframeIdx(editingKeyframes, svgX, svgY, duration, valueMin, valueMax);
     if (e.button === 2) {
       // Right-click: delete point if near
       if (idx != null) {
@@ -128,7 +136,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     } else {
       // Add keyframe at click position
       const t = clamp(xToTime(svgX, duration), 0, duration);
-      const v = clamp(yToValue(svgY), VALUE_MIN, VALUE_MAX);
+      const v = clamp(yToValue(svgY, valueMin, valueMax), valueMin, valueMax);
       // Don't allow duplicate t
       if (!editingKeyframes.some(kf => Math.abs(kf.time - t) < 1e-3)) {
         const next = sortKeyframes([...editingKeyframes, { time: t, value: v }]);
@@ -146,7 +154,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     const svgY = e.clientY - rect.top;
     // Clamp to bounds
     const t = clamp(xToTime(svgX, duration), 0, duration);
-    const v = clamp(yToValue(svgY), VALUE_MIN, VALUE_MAX);
+    const v = clamp(yToValue(svgY, valueMin, valueMax), valueMin, valueMax);
     setEditing((prev) => {
       if (!prev) return null;
       // Prevent moving past neighbors
@@ -181,7 +189,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     const rect = svgRef.current.getBoundingClientRect();
     const svgX = e.clientX - rect.left;
     const svgY = e.clientY - rect.top;
-    const idx = nearestKeyframeIdx(editingKeyframes, svgX, svgY, duration);
+    const idx = nearestKeyframeIdx(editingKeyframes, svgX, svgY, duration, valueMin, valueMax);
     setHoverIdx(idx);
   };
   const handlePointerLeaveSVG = () => setHoverIdx(null);
@@ -197,7 +205,15 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     const t = Math.round(i * 100) / 100;
     xTicks.push(t);
   }
-  const yTicks = [0, 0.25, 0.5, 0.75, 1];
+  const yTicks = React.useMemo(() => {
+    const steps = 4;
+    const ticks: number[] = [];
+    for (let i = 0; i <= steps; i += 1) {
+      const t = valueMin + (i / steps) * (valueMax - valueMin);
+      ticks.push(Math.abs(t) < 1e-6 ? 0 : t);
+    }
+    return ticks;
+  }, [valueMin, valueMax]);
 
   return (
     <VStack align="stretch" spacing={1}>
@@ -277,7 +293,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
             })}
             {/* Y ticks */}
             {yTicks.map((v, i) => {
-              const y = valueToY(v);
+              const y = valueToY(v, valueMin, valueMax);
               return (
                 <g key={i}>
                   <line x1={MARGIN.left - 6} y1={y} x2={MARGIN.left} y2={y} stroke="#aaa" strokeWidth={1} />
@@ -306,7 +322,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
           </g>
           {/* Curve path */}
           <path
-            d={getPath(editingKeyframes, duration)}
+            d={getPath(editingKeyframes, duration, valueMin, valueMax)}
             fill="none"
             stroke="#38bdf8"
             strokeWidth={2.5}
@@ -334,7 +350,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
           {/* Keyframe points */}
           {editingKeyframes.map((kf, i) => {
             const x = timeToX(kf.time, duration);
-            const y = valueToY(kf.value);
+            const y = valueToY(kf.value, valueMin, valueMax);
             const isActive = i === dragIdx || i === hoverIdx;
             return (
               <circle
@@ -354,7 +370,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
             <g pointerEvents="none">
               <rect
                 x={timeToX(editingKeyframes[dragIdx].time, duration) + 12}
-                y={valueToY(editingKeyframes[dragIdx].value) - 20}
+                y={valueToY(editingKeyframes[dragIdx].value, valueMin, valueMax) - 20}
                 width="54"
                 height="22"
                 rx="6"
@@ -365,7 +381,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
               />
               <text
                 x={timeToX(editingKeyframes[dragIdx].time, duration) + 39}
-                y={valueToY(editingKeyframes[dragIdx].value) - 6}
+                y={valueToY(editingKeyframes[dragIdx].value, valueMin, valueMax) - 6}
                 fontSize="12"
                 fill="#fbbf24"
                 textAnchor="middle"

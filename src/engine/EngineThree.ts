@@ -45,6 +45,11 @@ export class EngineThree {
   private driverApplying = false;
   private rigReady = false;
   private missingBoneWarnings = new Set<string>();
+  private bakedMixer: THREE.AnimationMixer | null = null;
+  private bakedActions = new Map<string, THREE.AnimationAction>();
+  private bakedClips: THREE.AnimationClip[] = [];
+  private bakedPaused = true;
+  private bakedCurrent: string | null = null;
 
   // Unified rotation state tracking for composite bones
   // Each bone maintains its complete 3D rotation (pitch/yaw/roll) to prevent overwriting
@@ -123,6 +128,7 @@ export class EngineThree {
   update(deltaSeconds: number) {
     const dtSeconds = Math.max(0, deltaSeconds || 0);
     if (dtSeconds <= 0 || this.isPaused) return;
+    if (this.bakedMixer && !this.bakedPaused) this.bakedMixer.update(dtSeconds);
     this.mixer.update(dtSeconds);
     if (!this.rigReady) return;
     this.applyDriverValues();
@@ -339,7 +345,7 @@ export class EngineThree {
     return !!BONE_AU_TO_BINDINGS[id];
   };
 
-  onReady = ({ meshes, model }: { meshes: THREE.Mesh[]; model?: THREE.Object3D }) => {
+  onReady = ({ meshes, model, animations }: { meshes: THREE.Mesh[]; model?: THREE.Object3D; animations?: THREE.AnimationClip[] }) => {
     this.meshes = meshes;
     if (model) {
       this.model = model;
@@ -349,7 +355,76 @@ export class EngineThree {
       this.missingBoneWarnings.clear();
       this.applyDriverValues();
     }
+
+    if (model && animations && animations.length) {
+      this.bakedMixer = new THREE.AnimationMixer(model);
+      this.bakedActions.clear();
+      this.bakedClips = animations;
+      animations.forEach((clip) => {
+        const action = this.bakedMixer!.clipAction(clip);
+        action.loop = THREE.LoopRepeat;
+        action.clampWhenFinished = false;
+        action.reset();
+        action.play();
+        action.paused = true; // keep paused by default
+        this.bakedActions.set(clip.name || `clip_${this.bakedActions.size}`, action);
+      });
+      this.bakedCurrent = this.bakedActions.keys().next().value ?? null;
+      this.bakedPaused = true;
+    }
   };
+
+  getBakedClipNames = () => Array.from(this.bakedActions.keys());
+
+  getCurrentBakedClip = () => this.bakedCurrent;
+
+  setBakedClip = (name: string) => {
+    if (!this.bakedActions.has(name)) return;
+    // Pause and reset all others
+    this.bakedActions.forEach((action, key) => {
+      if (key !== name) {
+        action.stop();
+        action.reset();
+        action.paused = true;
+      }
+    });
+    this.bakedCurrent = name;
+    const current = this.bakedActions.get(name)!;
+    if (!this.bakedPaused) {
+      current.reset();
+      current.paused = false;
+      current.play();
+    }
+  };
+
+  setBakedPlayback = (play: boolean) => {
+    if (!this.bakedActions.size || !this.bakedMixer) return;
+    if (!this.bakedCurrent) {
+      const first = this.bakedActions.keys().next().value;
+      if (first) this.bakedCurrent = first;
+    }
+    const current = this.bakedCurrent ? this.bakedActions.get(this.bakedCurrent) : undefined;
+    if (!current) return;
+
+    this.bakedPaused = !play;
+    if (play) {
+      current.reset();
+      current.paused = false;
+      current.play();
+    } else {
+      current.paused = true;
+    }
+  };
+
+  resetBakedClip = () => {
+    if (!this.bakedCurrent) return;
+    const action = this.bakedActions.get(this.bakedCurrent);
+    if (!action) return;
+    action.reset();
+    action.paused = this.bakedPaused;
+  };
+
+  getBakedPlaybackState = () => !this.bakedPaused && this.bakedActions.size > 0;
 
   /** Morphs **/
   setMorph = (key: string, v: number) => {
@@ -368,6 +443,37 @@ export class EngineThree {
       }
       if (idx !== undefined) infl[idx] = val;
     }
+    this.syncDriverValue(this.getMorphDriverKey(key), val);
+  };
+
+  /**
+   * Set a morph on a specific subset of meshes.
+   * This avoids iterating over the entire scene for hair-only updates.
+   */
+  setMorphOnMeshes = (meshNames: string[], key: string, v: number) => {
+    if (!meshNames || meshNames.length === 0) {
+      this.setMorph(key, v);
+      return;
+    }
+
+    const val = clamp01(v);
+    const nameSet = new Set(meshNames.map((n) => (n || '').toLowerCase()));
+
+    for (const m of this.meshes) {
+      const name = (m.name || '').toLowerCase();
+      if (!nameSet.has(name)) continue;
+      const dict: any = (m as any).morphTargetDictionary;
+      const infl: any = (m as any).morphTargetInfluences;
+      if (!dict || !infl) continue;
+      let idx = dict[key];
+      if (idx === undefined && MORPH_VARIANTS[key]) {
+        for (const alt of MORPH_VARIANTS[key]) {
+          if (dict[alt] !== undefined) { idx = dict[alt]; break; }
+        }
+      }
+      if (idx !== undefined) infl[idx] = val;
+    }
+
     this.syncDriverValue(this.getMorphDriverKey(key), val);
   };
 

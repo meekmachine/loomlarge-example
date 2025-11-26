@@ -10,7 +10,7 @@ export type FiberContextValue = {
   addFrameListener: (callback: (deltaSeconds: number) => void) => () => void;
 };
 
-const FiberCtx = createContext<FiberContextValue | null>(null);
+export const FiberCtx = createContext<FiberContextValue | null>(null);
 
 export const FiberProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   // Singletons per provider instance
@@ -51,12 +51,12 @@ export const FiberProvider: React.FC<React.PropsWithChildren> = ({ children }) =
         setEyesVertical: (v: number) => engineRef.current!.setEyesVertical?.(v),
         setHeadHorizontal: (v: number) => engineRef.current!.setHeadHorizontal?.(v),
         setHeadVertical: (v: number) => engineRef.current!.setHeadVertical?.(v),
-        setHeadRoll: (v: number) => engineRef.current!.setHeadTilt?.(v), // EngineFour uses setHeadTilt
+        setHeadRoll: (v: number) => engineRef.current!.setHeadRoll?.(v),
         setJawHorizontal: (v: number) => engineRef.current!.setJawHorizontal?.(v),
         setTongueHorizontal: (v: number) => engineRef.current!.setTongueHorizontal?.(v),
         setTongueVertical: (v: number) => engineRef.current!.setTongueVertical?.(v),
 
-        // Continuum transition methods for animation scheduler (animated)
+        // Continuum transition methods (smooth spring-based animations)
         transitionEyesHorizontal: (v: number, dur?: number) => engineRef.current!.transitionEyesHorizontal?.(v, dur),
         transitionEyesVertical: (v: number, dur?: number) => engineRef.current!.transitionEyesVertical?.(v, dur),
         transitionHeadHorizontal: (v: number, dur?: number) => engineRef.current!.transitionHeadHorizontal?.(v, dur),
@@ -66,9 +66,9 @@ export const FiberProvider: React.FC<React.PropsWithChildren> = ({ children }) =
         transitionTongueHorizontal: (v: number, dur?: number) => engineRef.current!.transitionTongueHorizontal?.(v, dur),
         transitionTongueVertical: (v: number, dur?: number) => engineRef.current!.transitionTongueVertical?.(v, dur),
 
-        onSnippetEnd: (name: string) => {
-          try {
-            // Dispatch a window-level CustomEvent for any listeners (debug/UIs)
+      onSnippetEnd: (name: string) => {
+        try {
+          // Dispatch a window-level CustomEvent for any listeners (debug/UIs)
             window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
           } catch {}
           try {
@@ -116,4 +116,8 @@ export function useFiberState() {
   const ctx = useContext(FiberCtx);
   if (!ctx) throw new Error('useFiberState must be used within a FiberProvider');
   return ctx;
+}
+
+export function useFiberOptional() {
+  return useContext(FiberCtx);
 }

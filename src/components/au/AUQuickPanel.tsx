@@ -19,13 +19,13 @@ import {
   FormLabel,
 } from '@chakra-ui/react';
 import { AU_TO_MORPHS, VISEME_KEYS, AU_INFO, MIXED_AUS } from '../../engine/arkit/shapeDict';
-import { useThreeState } from '../../context/threeContext';
+import { useEngineState } from '../../context/engineContext';
 import { EngineThree } from '../../engine/EngineThree';
 import { CurveEditor } from '../CurveEditor';
 
 export default function AUQuickPanel() {
   // Get EngineThree from context (all blendshape/boneshape logic lives there)
-  const ctx = useThreeState() as any;
+  const ctx = useEngineState() as any;
   const engine: EngineThree | undefined = ctx?.engine;
 
   // All AU ids present in ShapeDict (sorted)

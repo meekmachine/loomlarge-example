@@ -7,8 +7,9 @@ import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
 import { AUInfo, CONTINUUM_PAIRS, hasLeftRightMorphs } from '../../engine/arkit/shapeDict';
 import { EngineThree } from '../../engine/EngineThree';
+import { EngineFour } from '../../engine/EngineFour';
 import type { NormalizedSnippet } from '../../latticework/animation/types';
-import { useThreeState } from '../../context/threeContext';
+import { useEngineState } from '../../context/engineContext';
 
 type Keyframe = { time: number; value: number };
 
@@ -18,11 +19,101 @@ type SnippetCurveData = {
   snippet: NormalizedSnippet;
 };
 
+type ContinuumPair = typeof CONTINUUM_PAIRS[number];
+
+// Labels for continuum axes so curve editors match the slider language
+const CONTINUUM_LABELS: Record<string, string> = {
+  '61-62': 'Eyes — Horizontal',
+  '64-63': 'Eyes — Vertical',
+  '31-32': 'Head — Horizontal',
+  '54-33': 'Head — Vertical',
+  '55-56': 'Head — Tilt',
+  '30-35': 'Jaw — Horizontal',
+  '38-37': 'Tongue — Vertical',
+  '39-40': 'Tongue — Horizontal',
+};
+
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+const continuumKey = (pair: ContinuumPair) => `${pair.negative}-${pair.positive}`;
+
+const getContinuumLabel = (pair: ContinuumPair) =>
+  CONTINUUM_LABELS[continuumKey(pair)] ?? `AU ${pair.negative} ↔ AU ${pair.positive}`;
+
+// Linear interpolation helper to reconstruct a curve's value at an arbitrary time
+const getValueAtTime = (keyframes: Keyframe[], time: number): number => {
+  if (!keyframes.length) return 0;
+  const sorted = [...keyframes].sort((a, b) => a.time - b.time);
+  if (time <= sorted[0].time) return sorted[0].value;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    if (time === a.time) return a.value;
+    if (time >= a.time && time <= b.time) {
+      const t = (time - a.time) / (b.time - a.time || 1);
+      return a.value + t * (b.value - a.value);
+    }
+  }
+  return sorted[sorted.length - 1].value;
+};
+
+// Merge negative and positive AU curves into a single continuum (-1..1)
+const buildContinuumKeyframes = (negKeyframes: Keyframe[], posKeyframes: Keyframe[]): Keyframe[] => {
+  const times = Array.from(
+    new Set([...negKeyframes.map(k => k.time), ...posKeyframes.map(k => k.time)])
+  ).sort((a, b) => a - b);
+
+  return times.map((time) => {
+    const posVal = getValueAtTime(posKeyframes, time);
+    const negVal = getValueAtTime(negKeyframes, time);
+    return {
+      time,
+      value: clamp(posVal - negVal, -1, 1),
+    };
+  });
+};
+
+// Build continuum curve data for a pair, combining snippets that contain both AUs
+const buildContinuumCurveData = (
+  pair: ContinuumPair,
+  auSnippetCurves: Record<string, SnippetCurveData[]>
+): SnippetCurveData[] => {
+  const negKey = String(pair.negative);
+  const posKey = String(pair.positive);
+  const negativeCurves = auSnippetCurves[negKey] || [];
+  const positiveCurves = auSnippetCurves[posKey] || [];
+
+  const negByName = new Map(negativeCurves.map(c => [c.snippetName, c]));
+  const posByName = new Map(positiveCurves.map(c => [c.snippetName, c]));
+  const combinedNames = new Set<string>();
+
+  negativeCurves.forEach(c => { if (posByName.has(c.snippetName)) combinedNames.add(c.snippetName); });
+  positiveCurves.forEach(c => { if (negByName.has(c.snippetName)) combinedNames.add(c.snippetName); });
+
+  const combined: SnippetCurveData[] = [];
+  combinedNames.forEach((name) => {
+    const neg = negByName.get(name);
+    const pos = posByName.get(name);
+    if (!neg || !pos) return;
+
+    combined.push({
+      snippetName: name,
+      keyframes: buildContinuumKeyframes(neg.keyframes, pos.keyframes),
+      snippet: {
+        ...neg.snippet,
+        ...pos.snippet,
+      },
+    });
+  });
+
+  return combined;
+};
+
 interface AUSectionProps {
   section: string;
   aus: AUInfo[];
   auStates: Record<string, number>;
-  engine?: EngineThree;
+  engine?: EngineThree | EngineFour | null;
   showUnusedSliders?: boolean;
   onAUChange?: (id: string, value: number) => void;
   disabled?: boolean;
@@ -45,7 +136,7 @@ export default function AUSection({
   useCurveEditor = false,
   auSnippetCurves = {}
 }: AUSectionProps) {
-  const { anim } = useThreeState();
+  const { anim } = useEngineState();
   const toast = useToast();
 
   // Build a map of AU ID to continuum pair info
@@ -110,11 +201,81 @@ export default function AUSection({
     console.log(`[AUSection:${section}] Curve editor mode enabled`);
     console.log(`[AUSection:${section}] auSnippetCurves:`, auSnippetCurves);
     console.log(`[AUSection:${section}] AUs in this section:`, aus.map(au => au.id));
+    const renderedContinuums = new Set<string>();
 
     return (
       <DockableAccordionItem title={section}>
         <VStack spacing={4} mt={2} align="stretch">
           {aus.map((au) => {
+            if (renderedAUs.has(au.id)) return null;
+
+            const auNum = parseInt(au.id);
+            const continuumInfo = continuumMap.get(auNum);
+
+            // Continuum-aware curve editors (mirror how sliders combine AU pairs)
+            if (continuumInfo) {
+              const { pair, isNegative } = continuumInfo;
+              const pairedAUId = isNegative ? pair.positive : pair.negative;
+              const pairedAU = aus.find(a => parseInt(a.id) === pairedAUId);
+
+              if (pairedAU) {
+                const key = continuumKey(pair);
+                if (renderedContinuums.has(key)) return null;
+
+                renderedContinuums.add(key);
+                renderedAUs.add(au.id);
+                renderedAUs.add(pairedAU.id);
+
+                const continuumCurves = buildContinuumCurveData(pair, auSnippetCurves);
+                const label = getContinuumLabel(pair);
+
+                if (continuumCurves.length === 0) {
+                  return (
+                    <Box
+                      key={key}
+                      w="100%"
+                      p={3}
+                      bg="gray.750"
+                      borderRadius="md"
+                      border="1px dashed"
+                      borderColor="gray.600"
+                    >
+                      <HStack justify="space-between" align="flex-start">
+                        <Box>
+                          <Text fontSize="sm" color="gray.200" fontWeight="semibold">
+                            {label} (AU {pair.negative} ↔ AU {pair.positive})
+                          </Text>
+                          <Text fontSize="xs" color="gray.400">
+                            Continuum curves mirror the sliders (morph + bone). Add a snippet that includes both sides of this pair.
+                          </Text>
+                        </Box>
+                        <Text fontSize="xs" color="gray.500">No curves</Text>
+                      </HStack>
+                    </Box>
+                  );
+                }
+
+                return (
+                  <VStack key={key} w="100%" spacing={3} align="stretch">
+                    {continuumCurves.map((curveData, idx) => (
+                      <Box key={`${key}-${curveData.snippetName}-${idx}`} w="100%">
+                        <CurveEditor
+                          auId={`${pair.negative}↔${pair.positive}`}
+                          label={`${label} — ${curveData.snippetName}`}
+                          keyframes={curveData.keyframes}
+                          duration={curveData.snippet.duration || 2.0}
+                          currentTime={curveData.snippet.currentTime || 0}
+                          isPlaying={curveData.snippet.isPlaying || false}
+                          valueMin={-1}
+                          valueMax={1}
+                        />
+                      </Box>
+                    ))}
+                  </VStack>
+                );
+              }
+            }
+
             const snippetCurves = auSnippetCurves[au.id] || [];
             console.log(`[AUSection:${section}] AU ${au.id} (${au.name}) has ${snippetCurves.length} curves`);
 

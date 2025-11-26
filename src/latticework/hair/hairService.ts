@@ -51,6 +51,7 @@ interface HairPhysicsState {
 export class HairService {
   private actor: ReturnType<typeof createActor<typeof hairMachine>>;
   private objects: HairObjectRef[] = [];
+  private hairMeshNames: string[] = [];
   private subscribers: Set<(state: HairState) => void> = new Set();
   private engine: EngineThree | null = null;
 
@@ -58,19 +59,19 @@ export class HairService {
   private ammoPhysics: HairPhysicsAmmo | null = null;
   private physicsConfig: HairPhysicsConfig = {
     enabled: false,
-    stiffness: 5.0,        // Spring stiffness (lower = more movement)
-    damping: 0.3,          // Air resistance
-    inertia: 3.0,          // Head influence multiplier
-    gravity: 9.8,          // Gravity
-    responseScale: 2.0,    // Amplification factor for morph output
-    idleSwayAmount: 0.25,  // More visible idle sway
-    idleSwaySpeed: 0.8,    // Moderate sway speed
+    stiffness: 7.5,        // Spring stiffness (lower = more movement)
+    damping: 0.18,         // Air resistance
+    inertia: 3.5,          // Head influence multiplier
+    gravity: 12,           // Gravity
+    responseScale: 2.5,    // Amplification factor for morph output
+    idleSwayAmount: 0.12,  // Subtle idle sway so physics leads
+    idleSwaySpeed: 1.0,    // Moderate sway speed
     // Wind defaults (disabled)
     windStrength: 0,
     windDirectionX: 1.0,   // Default: wind from left
     windDirectionZ: 0,
     windTurbulence: 0.3,
-    windFrequency: 2.0,
+    windFrequency: 1.4,
   };
   private physicsState: HairPhysicsState = {
     left: 0,
@@ -114,6 +115,9 @@ export class HairService {
 
     // Delegate registration to engine - returns engine-agnostic metadata
     this.objects = this.engine.registerHairObjects(objects);
+    this.hairMeshNames = this.objects
+      .filter((obj) => obj.isMesh && !obj.isEyebrow)
+      .map((obj) => obj.name);
 
     // Reset to default state
     this.actor.send({ type: 'RESET_TO_DEFAULT' } as HairEvent);
@@ -214,7 +218,12 @@ export class HairService {
       console.log(`[HairService] setHairMorph: ${morphKey} = ${value.toFixed(3)}`);
     }
 
-    this.engine.setMorph(morphKey, value);
+    // Apply only to registered hair meshes to avoid iterating over the entire scene each frame
+    if (this.hairMeshNames.length > 0 && (this.engine as any).setMorphOnMeshes) {
+      this.engine.setMorphOnMeshes(this.hairMeshNames, morphKey, value);
+    } else {
+      this.engine.setMorph(morphKey, value);
+    }
   }
 
   /**
@@ -531,5 +540,6 @@ export class HairService {
     // Engine handles all Three.js cleanup
     // We just clear our references
     this.objects = [];
+    this.hairMeshNames = [];
   }
 }

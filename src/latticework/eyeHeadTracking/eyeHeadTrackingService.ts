@@ -13,6 +13,12 @@ import type {
 } from './types';
 import { DEFAULT_EYE_HEAD_CONFIG } from './types';
 import { EyeHeadTrackingScheduler, type EyeHeadHostCaps } from './eyeHeadTrackingScheduler';
+import { createActor } from 'xstate';
+import {
+  eyeHeadTrackingMachine,
+  type EyeHeadTrackingMachine,
+  type EyeHeadTrackingMachineContext,
+} from './eyeHeadTrackingMachine';
 
 export class EyeHeadTrackingService {
   private config: EyeHeadTrackingConfig;
@@ -32,6 +38,8 @@ export class EyeHeadTrackingService {
   private trackingMode: 'manual' | 'mouse' | 'webcam' = 'manual';
   private mouseListener: ((e: MouseEvent) => void) | null = null;
   private webcamTracking: any = null; // Webcam tracking instance
+  private machine: ReturnType<typeof createActor<EyeHeadTrackingMachine>> | null = null;
+  private filteredGaze: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
 
   constructor(
     config: EyeHeadTrackingConfig = {},
@@ -61,6 +69,22 @@ export class EyeHeadTrackingService {
 
     this.initializeScheduler();
     this.applyMixWeightSettings();
+    this.initializeMachine();
+  }
+
+  private initializeMachine(): void {
+    try {
+      this.machine = createActor(eyeHeadTrackingMachine).start();
+      this.machine.send({ type: 'UPDATE_CONFIG', config: this.config });
+      this.machine.send({
+        type: 'SET_STATUS',
+        eye: this.state.eyeStatus,
+        head: this.state.headStatus,
+        lastApplied: this.state.currentGaze,
+      });
+    } catch (err) {
+      console.warn('[EyeHeadTracking] Failed to initialize tracking machine', err);
+    }
   }
 
   private initializeScheduler(): void {
@@ -150,6 +174,12 @@ export class EyeHeadTrackingService {
 
     this.state.eyeStatus = 'idle';
     this.state.headStatus = 'idle';
+    this.machine?.send({
+      type: 'SET_STATUS',
+      eye: this.state.eyeStatus,
+      head: this.state.headStatus,
+      lastApplied: this.state.currentGaze,
+    });
   }
 
   /**
@@ -163,6 +193,7 @@ export class EyeHeadTrackingService {
 
     this.state.targetGaze = target;
     this.state.lastGazeUpdateTime = Date.now();
+    this.machine?.send({ type: 'SET_TARGET', target });
 
     if (this.config.eyeTrackingEnabled) {
       this.state.eyeStatus = 'tracking';
@@ -185,6 +216,12 @@ export class EyeHeadTrackingService {
     if (this.config.headTrackingEnabled) {
       this.state.headStatus = this.config.headFollowEyes && headDelay > 0 ? 'lagging' : 'tracking';
     }
+    this.machine?.send({
+      type: 'SET_STATUS',
+      eye: this.state.eyeStatus,
+      head: this.state.headStatus,
+      lastApplied: this.state.currentGaze,
+    });
 
     if (this.config.headTrackingEnabled && this.config.headFollowEyes && headDelay > 0) {
       if (this.state.headFollowTimer) {
@@ -289,6 +326,7 @@ export class EyeHeadTrackingService {
       this.applyMixWeightSettings();
     }
 
+    this.machine?.send({ type: 'UPDATE_CONFIG', config: this.config });
   }
 
   /**
@@ -296,6 +334,18 @@ export class EyeHeadTrackingService {
    */
   public getState(): EyeHeadTrackingState {
     return { ...this.state };
+  }
+
+  /**
+   * Get machine context (config + current/target gaze) for UI/debug overlays
+   */
+  public getMachineContext(): EyeHeadTrackingMachineContext | null {
+    if (!this.machine) return null;
+    try {
+      return this.machine.getSnapshot().context;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -328,6 +378,7 @@ export class EyeHeadTrackingService {
     this.cleanupMode();
 
     this.trackingMode = mode;
+    this.machine?.send({ type: 'SET_MODE', mode });
 
     // Setup new mode
     if (mode === 'mouse') {
@@ -447,12 +498,27 @@ export class EyeHeadTrackingService {
     const adjustedX = x + cameraOffset.x;
     const adjustedY = y + cameraOffset.y;
 
+    // Smooth target to prevent micro-jumps (especially near center crossing)
+    const prev = this.filteredGaze ?? this.state.currentGaze;
+    const rawDistance = Math.hypot(adjustedX - prev.x, adjustedY - prev.y);
+    const baseAlpha = this.trackingMode === 'mouse' ? 0.35 : 0.25;
+    const alpha = Math.min(0.85, baseAlpha + rawDistance * 0.3); // Larger moves respond faster
+    const smoothX = prev.x + (adjustedX - prev.x) * alpha;
+    const smoothY = prev.y + (adjustedY - prev.y) * alpha;
+    const smoothedTarget = { x: smoothX, y: smoothY, z: 0 };
 
-    // Calculate distance from current position (using adjusted coordinates)
+    // Calculate distance from current position (using smoothed coordinates)
     const { x: currentX, y: currentY } = this.state.currentGaze;
-    const deltaX = adjustedX - currentX;
-    const deltaY = adjustedY - currentY;
+    const deltaX = smoothX - currentX;
+    const deltaY = smoothY - currentY;
     const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    // Ignore ultra-small changes to avoid rescheduling noise when crossing center
+    if (distance < 0.003) {
+      this.filteredGaze = smoothedTarget;
+      this.state.currentGaze = smoothedTarget;
+      return;
+    }
 
     // Scale duration based on distance traveled
     // Base durations: eye 150-400ms, head 250-600ms
@@ -475,7 +541,7 @@ export class EyeHeadTrackingService {
     // Use animation agency if enabled AND available, otherwise use direct engine calls
     if (useAgency && scheduler && this.config.animationAgency) {
       scheduler.scheduleGazeTransition(
-        { x: adjustedX, y: adjustedY, z: 0 },
+        smoothedTarget,
         {
           eyeEnabled: applyEyes && this.config.eyeTrackingEnabled,
           headEnabled: applyHead && this.config.headTrackingEnabled,
@@ -487,14 +553,14 @@ export class EyeHeadTrackingService {
     } else if (this.config.engine) {
       // Direct engine path - simpler, bypasses animation scheduler
       if (applyEyes && this.config.eyeTrackingEnabled) {
-        const eyeYaw = adjustedX * eyeIntensity;
-        const eyePitch = adjustedY * eyeIntensity;
+        const eyeYaw = smoothedTarget.x * eyeIntensity;
+        const eyePitch = smoothedTarget.y * eyeIntensity;
         this.config.engine.transitionEyeComposite(eyeYaw, eyePitch, eyeDuration);
       }
 
       if (applyHead && this.config.headTrackingEnabled && this.config.headFollowEyes) {
-        const headYaw = adjustedX * headIntensity;
-        const headPitch = adjustedY * headIntensity;
+        const headYaw = smoothedTarget.x * headIntensity;
+        const headPitch = smoothedTarget.y * headIntensity;
         this.config.engine.transitionHeadComposite(headYaw, headPitch, 0, headDuration);
       }
     } else {
@@ -509,7 +575,12 @@ export class EyeHeadTrackingService {
     }
 
     // Update current gaze position for next distance calculation (use adjusted coordinates)
-    this.state.currentGaze = { x: adjustedX, y: adjustedY, z: 0 };
+    this.filteredGaze = smoothedTarget;
+    this.state.currentGaze = smoothedTarget;
+    this.machine?.send({
+      type: 'SET_STATUS',
+      lastApplied: this.state.currentGaze,
+    });
   }
 
   /**
@@ -617,6 +688,8 @@ export class EyeHeadTrackingService {
     this.headSnippets.clear();
     try { this.scheduler?.stop(); } catch {}
     this.scheduler = null;
+    try { this.machine?.stop(); } catch {}
+    this.machine = null;
   }
 }
 

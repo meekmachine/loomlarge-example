@@ -4,7 +4,6 @@ import {
   HStack,
   Button,
   useToast,
-  Input,
   IconButton,
   VStack,
   Slider,
@@ -19,7 +18,9 @@ import {
   MenuList,
   MenuItem,
   Collapse,
-  Divider
+  Divider,
+  Input,
+  Select
 } from '@chakra-ui/react';
 import {
   FaPlay,
@@ -406,6 +407,11 @@ export default function PlaybackControls() {
     }, 16);
 
     intensityTimers.current.set(name, timer);
+  }, [anim]);
+
+  // Mixer / blending metadata updater (stored on snippet)
+  const handleMixerParams = useCallback((name: string, params: any) => {
+    anim?.setSnippetMixerParams?.(name, params);
   }, [anim]);
 
   // Cleanup timers on unmount
@@ -855,6 +861,151 @@ export default function PlaybackControls() {
                                       </SliderTrack>
                                       <SliderThumb boxSize={3} />
                                     </Slider>
+
+                                    <Divider my={2} />
+
+                                    <HStack spacing={2} mb={2}>
+                                      <Box flex="1">
+                                        <Text fontSize="xs" color="gray.300">Blend Mode</Text>
+                                        <Select
+                                          size="sm"
+                                          value={sn.snippetBlendMode || 'replace'}
+                                          onChange={(e) => anim?.setSnippetBlendMode?.(sn.name, e.target.value)}
+                                        >
+                                          <option value="replace">Replace</option>
+                                          <option value="additive">Additive</option>
+                                        </Select>
+                                      </Box>
+                                      <Box flex="1">
+                                        <Text fontSize="xs" color="gray.300">Channel</Text>
+                                        <Input
+                                          size="sm"
+                                          placeholder="head / face / eyes"
+                                          value={sn.mixerChannel || ''}
+                                          onChange={(e) => handleMixerParams(sn.name, { mixerChannel: e.target.value || undefined })}
+                                        />
+                                      </Box>
+                                    </HStack>
+
+                                    <HStack spacing={2} mb={2}>
+                                      <Box flex="1">
+                                        <Text fontSize="xs" color="gray.300">Mixer Blend</Text>
+                                        <Select
+                                          size="sm"
+                                          value={sn.mixerBlendMode || 'replace'}
+                                          onChange={(e) => handleMixerParams(sn.name, { mixerBlendMode: e.target.value })}
+                                        >
+                                          <option value="replace">Replace</option>
+                                          <option value="crossfade">Crossfade</option>
+                                          <option value="fade">Fade</option>
+                                          <option value="additive">Additive</option>
+                                          <option value="warp">Warp</option>
+                                        </Select>
+                                      </Box>
+                                      <Box flex="1">
+                                        <Text fontSize="xs" color="gray.300">Loop Mode</Text>
+                                        <Select
+                                          size="sm"
+                                          value={sn.mixerLoopMode || 'repeat'}
+                                          onChange={(e) => handleMixerParams(sn.name, { mixerLoopMode: e.target.value })}
+                                        >
+                                          <option value="repeat">Repeat</option>
+                                          <option value="once">Once</option>
+                                          <option value="pingpong">PingPong</option>
+                                        </Select>
+                                      </Box>
+                                    </HStack>
+
+                                    <Text fontSize="xs" color="gray.300">
+                                      Mixer Weight: {(sn.mixerWeight ?? 1).toFixed(2)}
+                                    </Text>
+                                    <Slider
+                                      colorScheme="green"
+                                      min={0}
+                                      max={2}
+                                      step={0.05}
+                                      value={sn.mixerWeight ?? 1}
+                                      onChange={(val) => handleMixerParams(sn.name, { mixerWeight: val })}
+                                      size="sm"
+                                    >
+                                      <SliderTrack>
+                                        <SliderFilledTrack />
+                                      </SliderTrack>
+                                      <SliderThumb boxSize={3} />
+                                    </Slider>
+
+                                    <Text fontSize="xs" color="gray.300" mt={1}>
+                                      Fade (ms): {Math.round(sn.mixerFadeDurationMs ?? 300)}
+                                    </Text>
+                                    <Slider
+                                      colorScheme="yellow"
+                                      min={0}
+                                      max={2000}
+                                      step={50}
+                                      value={sn.mixerFadeDurationMs ?? 300}
+                                      onChange={(val) => handleMixerParams(sn.name, { mixerFadeDurationMs: val })}
+                                      size="sm"
+                                    >
+                                      <SliderTrack>
+                                        <SliderFilledTrack />
+                                      </SliderTrack>
+                                      <SliderThumb boxSize={3} />
+                                    </Slider>
+
+                                    <Text fontSize="xs" color="gray.300" mt={1}>
+                                      Warp (ms): {Math.round(sn.mixerWarpDurationMs ?? 0)}
+                                    </Text>
+                                    <Slider
+                                      colorScheme="teal"
+                                      min={0}
+                                      max={2000}
+                                      step={50}
+                                      value={sn.mixerWarpDurationMs ?? 0}
+                                      onChange={(val) => handleMixerParams(sn.name, { mixerWarpDurationMs: val })}
+                                      size="sm"
+                                    >
+                                      <SliderTrack>
+                                        <SliderFilledTrack />
+                                      </SliderTrack>
+                                      <SliderThumb boxSize={3} />
+                                    </Slider>
+
+                                    <Text fontSize="xs" color="gray.300" mt={1}>
+                                      Mixer Time Scale: {(sn.mixerTimeScale ?? 1).toFixed(2)}x
+                                    </Text>
+                                    <Slider
+                                      colorScheme="cyan"
+                                      min={0}
+                                      max={3}
+                                      step={0.1}
+                                      value={sn.mixerTimeScale ?? 1}
+                                      onChange={(val) => handleMixerParams(sn.name, { mixerTimeScale: val })}
+                                      size="sm"
+                                    >
+                                      <SliderTrack>
+                                        <SliderFilledTrack />
+                                      </SliderTrack>
+                                      <SliderThumb boxSize={3} />
+                                    </Slider>
+
+                                    <HStack spacing={4} mt={2} alignItems="center">
+                                      <HStack>
+                                        <Text fontSize="xs" color="gray.300">Additive</Text>
+                                        <Switch
+                                          size="sm"
+                                          isChecked={!!sn.mixerAdditive}
+                                          onChange={(e) => handleMixerParams(sn.name, { mixerAdditive: e.target.checked })}
+                                        />
+                                      </HStack>
+                                      <HStack>
+                                        <Text fontSize="xs" color="gray.300">Clamp</Text>
+                                        <Switch
+                                          size="sm"
+                                          isChecked={!!sn.mixerClampWhenFinished}
+                                          onChange={(e) => handleMixerParams(sn.name, { mixerClampWhenFinished: e.target.checked })}
+                                        />
+                                      </HStack>
+                                    </HStack>
                                   </Box>
                                 </motion.div>
                               ))}

@@ -128,6 +128,7 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
   const conversationRef = useRef<ConversationService | null>(null);
   const anthropicRef = useRef<Anthropic | null>(null);
   const userToastRef = useRef<any>(null);
+  const speechToastRef = useRef<any>(null);
 
   // Track emotion snippets for cleanup (lip sync and prosodic are now handled by TTS service)
   const emotionSnippetsRef = useRef<string[]>([]);
@@ -139,6 +140,46 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
   const pendingResponseRef = useRef<string>('');
 
   // Eye/head tracking is now fully autonomous - controlled by conversation service
+
+  // Update user speech toast (mirror French Quiz UX)
+  const updateUserToast = (text: string, isFinal: boolean, isInterruption: boolean) => {
+    const title = isInterruption
+      ? isFinal
+        ? 'You (interrupting - final)'
+        : 'You (interrupting...)'
+      : isFinal
+      ? 'You (final)'
+      : 'You (listening...)';
+
+    if (isFinal) {
+      if (speechToastRef.current && toast.update) {
+        toast.update(speechToastRef.current, {
+          title,
+          description: text,
+          status: isInterruption ? 'warning' : 'success',
+          duration: 2500,
+          isClosable: true,
+        });
+      }
+      speechToastRef.current = null;
+    } else {
+      if (!speechToastRef.current) {
+        speechToastRef.current = toast({
+          title,
+          description: text,
+          status: isInterruption ? 'warning' : 'info',
+          duration: null,
+          isClosable: false,
+        });
+      } else if (toast.update) {
+        toast.update(speechToastRef.current, {
+          title,
+          description: text,
+        });
+      }
+    }
+  };
+
 
   // Initialize services
   useEffect(() => {
@@ -188,8 +229,9 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
       {
         engine: 'webSpeech',
         rate: 1.0,
-        pitch: 1.0,
+        pitch: 0.8,
         volume: 1.0,
+        voiceName: 'Aaron',
 
         // Agency coordination - TTS now manages these
         lipSyncService: lipSyncRef.current,
@@ -249,7 +291,7 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
       ttsRef.current,
       transcriptionRef.current,
       {
-        autoListen: true,
+        autoListen: true, // start listening after agent finishes
         detectInterruptions: true,
         minSpeakTime: 500,
         eyeHeadTracking: eyeHeadTrackingService, // Use global service from context
@@ -267,12 +309,17 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
           if (isFinal) {
             setTranscribedText(text);
           }
+
+          updateUserToast(text, isFinal, isInterruption);
         },
         onAgentUtterance: (text) => {
           setSpeakingText(text);
+          // Ensure mic is off while agent is speaking
+          transcriptionRef.current?.stopListening();
         },
         onStateChange: (state) => {
           console.log('[AIChat] Conversation state:', state);
+          const prevState = conversationState;
           setConversationState(state);
 
           const isTalking = state === 'agentSpeaking';
@@ -280,6 +327,18 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
 
           setIsTalking(isTalking);
           setIsListening(isListening);
+
+          // Mirror French quiz: only listen when explicitly in userSpeaking
+          if (state === 'userSpeaking') {
+            transcriptionRef.current?.startListening();
+          } else if (state === 'agentSpeaking' || state === 'processing') {
+            transcriptionRef.current?.stopListening();
+          }
+
+          // Show thinking pose while processing
+          if (state === 'processing') {
+            applyEmotion('thinking');
+          }
 
           // Clean up snippets when transitioning from speaking
           if (conversationState === 'agentSpeaking' && (state === 'idle' || state === 'userSpeaking')) {
@@ -428,33 +487,49 @@ Assistant: "[EMOTION:thinking] That's fascinating to think about. Space explorat
 Keep conversations fun, engaging, and emotionally authentic!`;
 
     try {
-      const response = await anthropicRef.current.messages.create({
-        model: 'claude-sonnet-4-5-20250929', // Latest Claude Sonnet 4.5
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: conversationHistoryRef.current,
-      });
+      const messages = conversationHistoryRef.current.map((m) => ({
+        role: m.role,
+        content: [{ type: 'text' as const, text: m.content }],
+      }));
 
-      const assistantMessage = response.content[0].type === 'text' ? response.content[0].text : '';
+      // Try recommended public models (first = preferred)
+      const modelsToTry = ['claude-sonnet-4-5', 'claude-3-haiku-20240307'];
+      let assistantMessage = '';
+      let lastError: any = null;
 
-      // Add assistant message to history
-      conversationHistoryRef.current.push({ role: 'assistant', content: assistantMessage });
+      for (const model of modelsToTry) {
+        try {
+          const response = await anthropicRef.current.messages.create({
+            model,
+            max_tokens: 512,
+            system: systemPrompt,
+            messages,
+          });
+          const first = response.content?.[0];
+          assistantMessage = first && (first as any).type === 'text' ? (first as any).text : '';
+          if (assistantMessage) {
+            conversationHistoryRef.current.push({ role: 'assistant', content: assistantMessage });
+            return assistantMessage;
+          }
+        } catch (err) {
+          lastError = err;
+          console.warn(`[AIChat] Model ${model} failed:`, err?.message || err);
+        }
+      }
 
-      return assistantMessage;
+      throw lastError || new Error('No response from Anthropic');
     } catch (error: any) {
       console.error('[AIChat] API call failed:', error);
 
-      // Show user-friendly error
       toast({
         title: 'API Error',
-        description: error.message || 'Failed to connect to Claude API. Please check your API key.',
+        description: error?.message || 'Failed to connect to Claude API. Please check your API key.',
         status: 'error',
         duration: 5000,
         isClosable: true,
       });
 
-      // Return friendly error message
-      throw new Error(`Claude API error: ${error.message || 'Unknown error'}`);
+      throw new Error(`Claude API error: ${error?.message || 'Unknown error'}`);
     }
   };
 
@@ -595,11 +670,23 @@ Keep conversations fun, engaging, and emotionally authentic!`;
     }
   };
 
+  // UI: bottom-centered mic panel like French Quiz
   return (
-    <Box position="fixed" right="20rem" top="1rem" bg="white" p={4} borderRadius="md" boxShadow="lg" zIndex={999} maxW="400px">
-      <VStack spacing={4} align="stretch">
+    <Box
+      position="fixed"
+      bottom="20px"
+      left="50%"
+      transform="translateX(-50%)"
+      bg="white"
+      p={4}
+      borderRadius="md"
+      boxShadow="lg"
+      minWidth="360px"
+      zIndex={1000}
+    >
+      <VStack spacing={3} align="stretch">
         <HStack justify="space-between">
-          <Text fontSize="xl" fontWeight="bold">AI Chat</Text>
+          <Text fontSize="md" fontWeight="bold">AI Chat</Text>
           <Badge colorScheme={isConnected ? 'green' : 'red'}>
             {isConnected ? 'Connected' : 'Disconnected'}
           </Badge>
@@ -614,10 +701,11 @@ Keep conversations fun, engaging, and emotionally authentic!`;
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleApiKeySubmit()}
+              size="sm"
             />
             <IconButton
               aria-label="Connect"
-              icon={<Text>Connect</Text>}
+              icon={<Text fontSize="sm">Connect</Text>}
               onClick={handleApiKeySubmit}
               colorScheme="blue"
               size="sm"
@@ -627,10 +715,6 @@ Keep conversations fun, engaging, and emotionally authentic!`;
 
         {isConnected && (
           <>
-            <Text fontSize="sm" color="gray.500">
-              Current emotion: <Badge>{currentEmotion}</Badge>
-            </Text>
-
             <Text fontSize="sm" color="gray.500">
               Status: {conversationState === 'agentSpeaking' && 'Speaking...'}
               {conversationState === 'userSpeaking' && 'Listening...'}
@@ -648,7 +732,11 @@ Keep conversations fun, engaging, and emotionally authentic!`;
               }}
             >
               <Tooltip
-                label={conversationState === 'userSpeaking' ? 'Listening... Click to stop' : 'Click to talk'}
+                label={
+                  conversationState === 'userSpeaking'
+                    ? 'Listening... Click to stop'
+                    : 'Click to talk'
+                }
                 placement="top"
               >
                 <IconButton
@@ -656,22 +744,10 @@ Keep conversations fun, engaging, and emotionally authentic!`;
                   icon={<PhoneIcon />}
                   isRound
                   size="lg"
-                  colorScheme={conversationState === 'userSpeaking' ? 'green' : 'blue'}
+                  colorScheme={conversationState === 'userSpeaking' ? 'green' : 'gray'}
                   onClick={conversationState === 'userSpeaking' ? stopListening : startConversation}
-                  width="100%"
                 />
               </Tooltip>
-            </Box>
-
-            <Box maxH="200px" overflowY="auto" bg="gray.50" p={2} borderRadius="md">
-              {messages.map((msg, idx) => (
-                <Box key={idx} mb={2}>
-                  <Text fontSize="xs" fontWeight="bold" color={msg.role === 'user' ? 'blue.600' : 'green.600'}>
-                    {msg.role === 'user' ? 'You' : 'AI'}:
-                  </Text>
-                  <Text fontSize="sm">{msg.content}</Text>
-                </Box>
-              ))}
             </Box>
           </>
         )}

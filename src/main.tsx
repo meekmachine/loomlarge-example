@@ -140,11 +140,7 @@ const theme = extendTheme({
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <ChakraProvider theme={theme}>
-      {/*
-        Initialize global contexts here.
-        ThreeProvider wraps the app and provides engine, anim, and other services.
-      */}
-      <ThreeProvider >
+      <ThreeProvider>
         <App />
       </ThreeProvider>
     </ChakraProvider>

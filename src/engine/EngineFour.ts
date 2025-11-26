@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SpringValue } from '@react-spring/core';
 import {
   AU_TO_MORPHS,
   MORPH_VARIANTS,
@@ -69,11 +70,71 @@ export class EngineFour {
   private bones: ResolvedBones = {};
   private mixWeights: Record<number, number> = {};
 
+  // Spring values for smooth continuum transitions (react-spring based)
+  private eyeYawSpring: SpringValue<number>;
+  private eyePitchSpring: SpringValue<number>;
+  private headYawSpring: SpringValue<number>;
+  private headPitchSpring: SpringValue<number>;
+  private headRollSpring: SpringValue<number>;
+  private jawYawSpring: SpringValue<number>;
+  private tongueYawSpring: SpringValue<number>;
+  private tonguePitchSpring: SpringValue<number>;
+
   // Callback for external state updates (React state, etc.)
   private onStateChange?: () => void;
 
   constructor(onStateChange?: () => void) {
     this.onStateChange = onStateChange;
+
+    // Initialize spring values with onChange handlers that apply the composite motion
+    this.eyeYawSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.currentEyeYaw = v.value;
+        this.applyEyeComposite(this.currentEyeYaw, this.currentEyePitch);
+      }
+    });
+    this.eyePitchSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.currentEyePitch = v.value;
+        this.applyEyeComposite(this.currentEyeYaw, this.currentEyePitch);
+      }
+    });
+    this.headYawSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.currentHeadYaw = v.value;
+        this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
+      }
+    });
+    this.headPitchSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.currentHeadPitch = v.value;
+        this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
+      }
+    });
+    this.headRollSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.currentHeadRoll = v.value;
+        this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, this.currentHeadRoll);
+      }
+    });
+    this.jawYawSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.boneRotations.JAW.yaw = v.value;
+        this.applyCompositeBone('JAW');
+      }
+    });
+    this.tongueYawSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.boneRotations.TONGUE.yaw = v.value;
+        this.applyCompositeBone('TONGUE');
+      }
+    });
+    this.tonguePitchSpring = new SpringValue(0, {
+      onChange: (v) => {
+        this.boneRotations.TONGUE.pitch = v.value;
+        this.applyCompositeBone('TONGUE');
+      }
+    });
   }
 
   /** Advance all active transitions by delta time (called from external RAF loop or useFrame) */
@@ -234,19 +295,161 @@ export class EngineFour {
     if (!bone) return;
 
     const rotState = this.boneRotations[boneName];
-    const rotConfig = COMPOSITE_ROTATIONS[boneName];
+    const rotConfig = COMPOSITE_ROTATIONS.find(c => c.node === boneName);
     if (!rotConfig) return;
 
-    const euler = new THREE.Euler(
-      deg2rad(rotState.pitch * rotConfig.pitch.scale * (rotConfig.pitch.flip ? -1 : 1)),
-      deg2rad(rotState.yaw * rotConfig.yaw.scale * (rotConfig.yaw.flip ? -1 : 1)),
-      deg2rad(rotState.roll * rotConfig.roll.scale * (rotConfig.roll.flip ? -1 : 1)),
-      rotConfig.order
-    );
+    // Map rotState axes to actual bone axes (rx/ry/rz) defined in shapeDict
+    let rx = 0, ry = 0, rz = 0;
+    const toRad = (v: number) => deg2rad(v * 30); // use 30deg span for continuum
+
+    if (rotConfig.pitch) {
+      const r = toRad(rotState.pitch);
+      if (rotConfig.pitch.axis === 'rx') rx = r;
+      else if (rotConfig.pitch.axis === 'ry') ry = r;
+      else if (rotConfig.pitch.axis === 'rz') rz = r;
+    }
+    if (rotConfig.yaw) {
+      const r = toRad(rotState.yaw);
+      if (rotConfig.yaw.axis === 'rx') rx = r;
+      else if (rotConfig.yaw.axis === 'ry') ry = r;
+      else if (rotConfig.yaw.axis === 'rz') rz = r;
+    }
+    if (rotConfig.roll) {
+      const r = toRad(rotState.roll);
+      if (rotConfig.roll.axis === 'rx') rx = r;
+      else if (rotConfig.roll.axis === 'ry') ry = r;
+      else if (rotConfig.roll.axis === 'rz') rz = r;
+    }
+
+    const euler = new THREE.Euler(rx, ry, rz, 'XYZ');
 
     const q = new THREE.Quaternion().setFromEuler(euler);
     bone.obj.quaternion.copy(bone.baseQuat).multiply(q);
   };
+
+  // --- Composite helpers (mirrors EngineThree) ---
+  private applyMorphs(names: string[], value: number) {
+    const v = Math.max(0, Math.min(1, value));
+    for (const name of names) {
+      this.setMorph(name, v);
+    }
+  }
+
+  private applyBoneComposite(
+    ids: { leftId: number; rightId: number; upId: number; downId: number; tiltLeftId?: number; tiltRightId?: number },
+    vals: { yaw: number; pitch: number; roll?: number }
+  ) {
+    if (!this.model) return;
+
+    const yawId = vals.yaw < 0 ? ids.leftId : vals.yaw > 0 ? ids.rightId : null;
+    const pitchId = vals.pitch < 0 ? ids.downId : vals.pitch > 0 ? ids.upId : null;
+    const roll = vals.roll ?? 0;
+    const tiltId = roll < 0 ? ids.tiltLeftId : roll > 0 ? ids.tiltRightId : null;
+
+    if (!yawId && !pitchId && !tiltId) return;
+
+    type R = { rx?: number; ry?: number; rz?: number; tx?: number; ty?: number; tz?: number; base: NodeBase };
+    const perNode = new Map<THREE.Object3D, R>();
+
+    const selected: Array<{ id: number; v: number; bindings: any[] }> = [];
+    if (yawId) selected.push({ id: yawId, v: Math.abs(vals.yaw), bindings: BONE_AU_TO_BINDINGS[yawId] || [] });
+    if (pitchId) selected.push({ id: pitchId, v: Math.abs(vals.pitch), bindings: BONE_AU_TO_BINDINGS[pitchId] || [] });
+    if (tiltId) selected.push({ id: tiltId, v: Math.abs(roll), bindings: BONE_AU_TO_BINDINGS[tiltId] || [] });
+
+    for (const sel of selected) {
+      for (const raw of sel.bindings) {
+        const b = { ...raw };
+        if (sel.id >= 61 && sel.id <= 62) {
+          b.channel = EYE_AXIS.yaw;
+        } else if (sel.id >= 63 && sel.id <= 64) {
+          b.channel = EYE_AXIS.pitch;
+        }
+
+        const entry = this.bones[b.node as keyof ResolvedBones];
+        if (!entry) continue;
+
+        const signed = Math.min(1, Math.max(-1, sel.v * (b.scale ?? 1)));
+        const radians = b.maxDegrees ? deg2rad(b.maxDegrees) * signed : 0;
+        const units = b.maxUnits ? b.maxUnits * signed : 0;
+
+        let agg = perNode.get(entry.obj);
+        if (!agg) {
+          agg = { base: entry };
+          perNode.set(entry.obj, agg);
+        }
+        if (b.channel === 'rx' || b.channel === 'ry' || b.channel === 'rz') {
+          agg[b.channel] = (agg[b.channel] ?? 0) + radians;
+        } else {
+          agg[b.channel] = (agg[b.channel] ?? 0) + units;
+        }
+      }
+    }
+
+    perNode.forEach((agg, obj) => {
+      const { base } = agg;
+      obj.position.copy(base.basePos);
+      if (agg.tx || agg.ty || agg.tz) {
+        const dir = new THREE.Vector3(agg.tx ?? 0, agg.ty ?? 0, agg.tz ?? 0);
+        dir.applyQuaternion(base.baseQuat);
+        obj.position.add(dir);
+      }
+
+      const q = new THREE.Quaternion();
+      const qx = new THREE.Quaternion();
+      const qy = new THREE.Quaternion();
+      const qz = new THREE.Quaternion();
+
+      qx.setFromAxisAngle(X_AXIS, agg.rx ?? 0);
+      qy.setFromAxisAngle(Y_AXIS, agg.ry ?? 0);
+      qz.setFromAxisAngle(Z_AXIS, agg.rz ?? 0);
+
+      q.copy(base.baseQuat).multiply(qy).multiply(qx).multiply(qz);
+      obj.quaternion.copy(q);
+      obj.updateMatrixWorld(false);
+    });
+  }
+
+  private applyCompositeMotion(
+    baseYawId: number,
+    basePitchId: number,
+    yaw: number,
+    pitch: number,
+    downIdOverride?: number,
+    tiltIds?: { left: number; right: number },
+    roll?: number
+  ) {
+    const yawMix = this.getAUMixWeight(baseYawId);
+    const pitchMix = this.getAUMixWeight(basePitchId);
+
+    const leftId = baseYawId;
+    const rightId = baseYawId + 1;
+    const upId = basePitchId;
+    const downId = downIdOverride ?? basePitchId + 21;
+
+    const yawBone = -yaw;
+    const yawAbs = Math.abs(yawBone);
+    const pitchAbs = Math.abs(pitch);
+
+    const rollVal = roll ?? 0;
+    const rollAbs = Math.abs(rollVal);
+    const tiltLeftId = tiltIds?.left;
+    const tiltRightId = tiltIds?.right;
+
+    this.applyBoneComposite(
+      { leftId, rightId, upId, downId, tiltLeftId, tiltRightId },
+      { yaw: yawBone, pitch, roll: rollVal }
+    );
+
+    this.applyMorphs(AU_TO_MORPHS[leftId] || [], yaw < 0 ? Math.abs(yaw) * yawMix : 0);
+    this.applyMorphs(AU_TO_MORPHS[rightId] || [], yaw > 0 ? Math.abs(yaw) * yawMix : 0);
+    this.applyMorphs(AU_TO_MORPHS[downId] || [], pitch < 0 ? pitchAbs * pitchMix : 0);
+    this.applyMorphs(AU_TO_MORPHS[upId] || [], pitch > 0 ? pitchAbs * pitchMix : 0);
+    if (tiltLeftId && tiltRightId) {
+      this.applyMorphs(AU_TO_MORPHS[tiltLeftId] || [], rollVal < 0 ? rollAbs * this.getAUMixWeight(tiltLeftId) : 0);
+      this.applyMorphs(AU_TO_MORPHS[tiltRightId] || [], rollVal > 0 ? rollAbs * this.getAUMixWeight(tiltRightId) : 0);
+    }
+    this.model?.updateMatrixWorld(true);
+  }
 
   /** Set morph target directly */
   setMorph = (name: string, value: number) => {
@@ -283,6 +486,13 @@ export class EngineFour {
   private resolveBones(model: THREE.Object3D): ResolvedBones {
     const result: ResolvedBones = {};
 
+    const snapshot = (obj: THREE.Object3D): NodeBase => ({
+      obj,
+      basePos: obj.position.clone(),
+      baseQuat: obj.quaternion.clone(),
+      baseEuler: new THREE.Euler().setFromQuaternion(obj.quaternion.clone(), obj.rotation.order),
+    });
+
     const findNode = (name?: string | null): THREE.Object3D | undefined => {
       if (!name) return undefined;
       return model.getObjectByName(name) ?? undefined;
@@ -291,12 +501,7 @@ export class EngineFour {
     const register = (key: BoneKeys, primary?: string | null, fallback?: string | null) => {
       const obj = findNode(primary) || findNode(fallback || undefined);
       if (obj) {
-        result[key] = {
-          obj,
-          basePos: obj.position.clone(),
-          baseQuat: obj.quaternion.clone(),
-          baseEuler: obj.rotation.clone()
-        };
+        result[key] = snapshot(obj);
       }
     };
 
@@ -307,12 +512,68 @@ export class EngineFour {
     register('NECK', CC4_BONE_NODES.NECK);
     register('TONGUE', CC4_BONE_NODES.TONGUE);
 
+    // Optional neck twist
+    const neckTwist = findNode(CC4_BONE_NODES.NECK_TWIST);
+    if (neckTwist) (result as any).NECK2 = snapshot(neckTwist);
+
+    // Warn if key composites missing
+    (['HEAD','EYE_L','EYE_R','JAW','TONGUE'] as const).forEach((key) => {
+      if (!result[key]) {
+        const expected =
+          key === 'EYE_L' ? CC4_BONE_NODES.EYE_L :
+          key === 'EYE_R' ? CC4_BONE_NODES.EYE_R :
+          key === 'HEAD' ? CC4_BONE_NODES.HEAD :
+          key === 'JAW' ? CC4_BONE_NODES.JAW :
+          CC4_BONE_NODES.TONGUE;
+        console.warn(`[EngineFour] Missing ${key} bone (expected node "${expected}")`);
+      }
+    });
+
     return result;
   }
 
   /** Update engine (called from useFrame or RAF) */
   update = (deltaSeconds: number) => {
     this.advanceTransitionsByMs(deltaSeconds * 1000);
+  };
+
+  /** Reset all morphs/bones and transitions to neutral */
+  resetToNeutral = () => {
+    this.auValues = {};
+    this.transitions = [];
+
+    // Reset composite rotation state
+    this.boneRotations = {
+      JAW: { pitch: 0, yaw: 0, roll: 0 },
+      HEAD: { pitch: 0, yaw: 0, roll: 0 },
+      EYE_L: { pitch: 0, yaw: 0, roll: 0 },
+      EYE_R: { pitch: 0, yaw: 0, roll: 0 },
+      TONGUE: { pitch: 0, yaw: 0, roll: 0 }
+    };
+
+    this.currentEyeYaw = 0;
+    this.currentEyePitch = 0;
+    this.currentHeadYaw = 0;
+    this.currentHeadPitch = 0;
+    this.currentHeadRoll = 0;
+
+    // Zero out morph targets
+    for (const m of this.meshes) {
+      const infl: any = (m as any).morphTargetInfluences;
+      if (infl) {
+        for (let i = 0; i < infl.length; i++) infl[i] = 0;
+      }
+    }
+
+    // Reset bones to bind poses if available
+    for (const bone of Object.values(this.bones)) {
+      if (!bone) continue;
+      bone.obj.position.copy(bone.basePos);
+      bone.obj.quaternion.copy(bone.baseQuat);
+      bone.obj.rotation.copy(bone.baseEuler);
+    }
+
+    this.onStateChange?.();
   };
 
   /** Pause all transitions */
@@ -336,33 +597,27 @@ export class EngineFour {
 
   // Composite continuum helpers
   setEyesHorizontal = (value: number) => {
-    this.boneRotations.EYE_L.yaw = value;
-    this.boneRotations.EYE_R.yaw = value;
-    this.applyCompositeBone('EYE_L');
-    this.applyCompositeBone('EYE_R');
+    this.applyEyeComposite(value, this.currentEyePitch);
   };
 
   setEyesVertical = (value: number) => {
-    this.boneRotations.EYE_L.pitch = value;
-    this.boneRotations.EYE_R.pitch = value;
-    this.applyCompositeBone('EYE_L');
-    this.applyCompositeBone('EYE_R');
+    this.applyEyeComposite(this.currentEyeYaw, value);
   };
 
   setHeadHorizontal = (value: number) => {
-    this.boneRotations.HEAD.yaw = value;
-    this.applyCompositeBone('HEAD');
+    this.applyHeadComposite(value, this.currentHeadPitch, this.currentHeadRoll);
   };
 
   setHeadVertical = (value: number) => {
-    this.boneRotations.HEAD.pitch = value;
-    this.applyCompositeBone('HEAD');
+    this.applyHeadComposite(this.currentHeadYaw, value, this.currentHeadRoll);
   };
 
-  setHeadTilt = (value: number) => {
-    this.boneRotations.HEAD.roll = value;
-    this.applyCompositeBone('HEAD');
+  setHeadRoll = (value: number) => {
+    this.applyHeadComposite(this.currentHeadYaw, this.currentHeadPitch, value);
   };
+
+  // Alias for backwards compatibility
+  setHeadTilt = this.setHeadRoll;
 
   setJawHorizontal = (value: number) => {
     this.boneRotations.JAW.yaw = value;
@@ -391,21 +646,105 @@ export class EngineFour {
     return this.mixWeights[id] ?? 0.5;
   };
 
-  /** Apply composite head rotation */
+  /** Apply composite head rotation (bones + morphs) */
   applyHeadComposite = (yaw: number, pitch: number, roll: number) => {
-    this.boneRotations.HEAD.yaw = yaw;
-    this.boneRotations.HEAD.pitch = pitch;
-    this.boneRotations.HEAD.roll = roll;
-    this.applyCompositeBone('HEAD');
+    this.currentHeadYaw = Math.max(-1, Math.min(1, yaw));
+    this.currentHeadPitch = Math.max(-1, Math.min(1, pitch));
+    this.currentHeadRoll = Math.max(-1, Math.min(1, roll));
+    this.applyCompositeMotion(31, 33, this.currentHeadYaw, this.currentHeadPitch, 54, { left: 55, right: 56 }, this.currentHeadRoll);
   };
 
-  /** Apply composite eye rotation */
+  /** Apply composite eye rotation (bones + morphs) */
   applyEyeComposite = (yaw: number, pitch: number) => {
-    this.boneRotations.EYE_L.yaw = yaw;
-    this.boneRotations.EYE_L.pitch = pitch;
-    this.boneRotations.EYE_R.yaw = yaw;
-    this.boneRotations.EYE_R.pitch = pitch;
-    this.applyCompositeBone('EYE_L');
-    this.applyCompositeBone('EYE_R');
+    this.currentEyeYaw = Math.max(-1, Math.min(1, yaw));
+    this.currentEyePitch = Math.max(-1, Math.min(1, pitch));
+    this.applyCompositeMotion(61, 63, this.currentEyeYaw, this.currentEyePitch, 64);
+  };
+
+  // ============================================================
+  // Spring-based transition methods (smooth physics-based animations)
+  // ============================================================
+
+  /** Helper to convert duration to spring config */
+  private durationToSpringConfig = (durationMs: number) => {
+    // Map duration to spring tension/friction for similar timing
+    // Shorter durations = higher tension, lower friction
+    // Longer durations = lower tension, higher friction
+    const baseTension = 300;
+    const baseFriction = 26;
+    const durationFactor = Math.max(0.1, durationMs / 200); // 200ms as baseline
+    return {
+      tension: baseTension / durationFactor,
+      friction: baseFriction * Math.sqrt(durationFactor),
+      precision: 0.001,
+    };
+  };
+
+  /** Smoothly transition eyes horizontal (yaw) over duration */
+  transitionEyesHorizontal = (targetValue: number, durationMs: number = 200) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.eyeYawSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition eyes vertical (pitch) over duration */
+  transitionEyesVertical = (targetValue: number, durationMs: number = 200) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.eyePitchSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition head horizontal (yaw) over duration */
+  transitionHeadHorizontal = (targetValue: number, durationMs: number = 300) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.headYawSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition head vertical (pitch) over duration */
+  transitionHeadVertical = (targetValue: number, durationMs: number = 300) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.headPitchSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition head roll/tilt over duration */
+  transitionHeadRoll = (targetValue: number, durationMs: number = 300) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.headRollSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition jaw horizontal (yaw) over duration */
+  transitionJawHorizontal = (targetValue: number, durationMs: number = 200) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.jawYawSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition tongue horizontal (yaw) over duration */
+  transitionTongueHorizontal = (targetValue: number, durationMs: number = 200) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.tongueYawSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition tongue vertical (pitch) over duration */
+  transitionTongueVertical = (targetValue: number, durationMs: number = 200) => {
+    const target = Math.max(-1, Math.min(1, targetValue ?? 0));
+    this.tonguePitchSpring.start(target, { config: this.durationToSpringConfig(durationMs) });
+  };
+
+  /** Smoothly transition both eye axes together */
+  transitionEyeComposite = (targetYaw: number, targetPitch: number, durationMs: number = 200) => {
+    const config = this.durationToSpringConfig(durationMs);
+    const yaw = Math.max(-1, Math.min(1, targetYaw ?? 0));
+    const pitch = Math.max(-1, Math.min(1, targetPitch ?? 0));
+    this.eyeYawSpring.start(yaw, { config });
+    this.eyePitchSpring.start(pitch, { config });
+  };
+
+  /** Smoothly transition all head axes together */
+  transitionHeadComposite = (targetYaw: number, targetPitch: number, targetRoll: number = 0, durationMs: number = 300) => {
+    const config = this.durationToSpringConfig(durationMs);
+    const yaw = Math.max(-1, Math.min(1, targetYaw ?? 0));
+    const pitch = Math.max(-1, Math.min(1, targetPitch ?? 0));
+    const roll = Math.max(-1, Math.min(1, targetRoll ?? 0));
+    this.headYawSpring.start(yaw, { config });
+    this.headPitchSpring.start(pitch, { config });
+    this.headRollSpring.start(roll, { config });
   };
 }

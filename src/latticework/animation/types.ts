@@ -5,6 +5,22 @@ import type { Engine, HostCaps } from '../../engine/EngineThree.types';
 // Re-export Engine types for convenience
 export type { Engine, HostCaps };
 
+// ---------- Mixer blending (AnimationMixer) ----------
+export type MixerBlendMode = 'replace' | 'additive' | 'crossfade' | 'fade' | 'warp';
+export type MixerLoopMode = 'once' | 'repeat' | 'pingpong';
+
+export type MixerBlendConfig = {
+  mixerChannel?: string;              // Logical channel (body/head/face/eyes/etc.)
+  mixerBlendMode?: MixerBlendMode;    // How this snippet should blend on the channel
+  mixerWeight?: number;               // Effective weight for the action
+  mixerFadeDurationMs?: number;       // Fade time when starting/stopping/crossfading
+  mixerWarpDurationMs?: number;       // Optional tempo-match window when warping
+  mixerTimeScale?: number;            // Playback speed for the action
+  mixerLoopMode?: MixerLoopMode;      // Loop policy when using mixer clips
+  mixerClampWhenFinished?: boolean;   // Clamp pose after finishing (LoopOnce)
+  mixerAdditive?: boolean;            // Treat clip as additive layer
+};
+
 // ---------- Core curve types ----------
 export type CurvePoint = {
   time: number;
@@ -43,6 +59,17 @@ export type Snippet = {
    */
   snippetBlendMode?: 'replace' | 'additive';
 
+  // Mixer (AnimationMixer) metadata for clip-backed blending
+  mixerChannel?: string;
+  mixerBlendMode?: MixerBlendMode;
+  mixerWeight?: number;
+  mixerFadeDurationMs?: number;
+  mixerWarpDurationMs?: number;
+  mixerTimeScale?: number;
+  mixerLoopMode?: MixerLoopMode;
+  mixerClampWhenFinished?: boolean;
+  mixerAdditive?: boolean;
+
   // Keyframes (one or both may appear)
   au?: AUKeyframe[];
   viseme?: VisemeKeyframe[];
@@ -65,6 +92,17 @@ export type NormalizedSnippet = {
   snippetCategory: 'auSnippet' | 'visemeSnippet' | 'default';
   snippetPriority: number;
   snippetBlendMode: 'replace' | 'additive';  // Blend mode for AU combination
+
+  // Mixer (AnimationMixer) metadata
+  mixerChannel?: string;
+  mixerBlendMode?: MixerBlendMode;
+  mixerWeight?: number;
+  mixerFadeDurationMs?: number;
+  mixerWarpDurationMs?: number;
+  mixerTimeScale?: number;
+  mixerLoopMode?: MixerLoopMode;
+  mixerClampWhenFinished?: boolean;
+  mixerAdditive?: boolean;
 
   // Playback bookkeeping (UI/engine parity)
   currentTime: number;

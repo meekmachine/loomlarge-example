@@ -60,6 +60,13 @@ Each hair/eyebrow part can be:
 - Automatically classified as hair or eyebrow based on name
 - Controlled with separate color settings
 
+### Hair Physics (spring-damper)
+
+- Toggle on/off in the Hair section
+- Tunable sliders for stiffness, damping, head influence (inertia), gravity, response scale, idle sway, and wind
+- Default tuning favors quicker, less “mushy” motion (higher stiffness/inertia, lighter damping, slightly stronger gravity)
+- Physics output is applied only to registered hair meshes for lower per-frame cost
+
 ## Usage
 
 ### In the App
@@ -131,6 +138,16 @@ window.hairService.send({
   partName: 'Male_Bushy',
   visible: false
 })
+
+// Enable physics and tweak config
+window.hairService.setPhysicsEnabled(true);
+window.hairService.updatePhysicsConfig({
+  stiffness: 7.5,
+  damping: 0.18,
+  inertia: 3.5,
+  gravity: 12,
+  responseScale: 2.5
+});
 
 // Reset to defaults
 window.hairService.send({

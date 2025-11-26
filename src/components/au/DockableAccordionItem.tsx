@@ -70,7 +70,7 @@ function DockableAccordionItem({
             _expanded={{ bg: 'gray.700', borderBottom: '2px solid', borderColor: 'brand.500' }}
             py={3}
           >
-            <Box flex="1" textAlign="left" fontWeight="semibold">
+            <Box flex="1" textAlign="left" fontWeight="semibold" color="brand.600">
               {title}
             </Box>
 

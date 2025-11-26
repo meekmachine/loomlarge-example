@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF, Environment, OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
+import { SkeletonUtils } from 'three-stdlib';
 import { useFiberState } from '../context/fiberContext';
 
 type CharacterReady = {
@@ -18,6 +19,7 @@ type Props = {
   className?: string;
   skyboxUrl?: string;
   environmentPreset?: 'sunset' | 'dawn' | 'night' | 'warehouse' | 'forest' | 'apartment' | 'studio' | 'city' | 'park' | 'lobby';
+  cameraOverride?: { position: [number, number, number]; target: [number, number, number] };
 };
 
 /**
@@ -37,7 +39,6 @@ function CharacterModel({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Object3D | null>(null);
-  const [isReady, setIsReady] = useState(false);
 
   const { scene: threeScene } = useThree();
   const { engine, anim } = useFiberState();
@@ -52,26 +53,30 @@ function CharacterModel({
 
   // Initialize the model when it loads
   useEffect(() => {
-    if (!loadedScene || isReady) return;
+    if (!loadedScene) return;
+    // Skip if we've already instantiated a model
+    if (modelRef.current) return;
 
-    // Clone the scene to avoid modifying the cached version
-    const model = loadedScene.clone();
+    // Clone the scene to avoid modifying the cached version (preserve skinning)
+    const model = SkeletonUtils.clone(loadedScene);
     modelRef.current = model;
 
-    // Center and scale the model
+    // Scale & center: shrink to ~1.6 units tall and place feet on ground
     const box = new THREE.Box3().setFromObject(model);
-    const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
-
-    // Center the model
-    model.position.x = -center.x;
-    model.position.y = -center.y;
-    model.position.z = -center.z;
-
-    // Scale to fit within reasonable bounds (about 2 units tall)
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = 2 / maxDim;
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const desiredMax = .03;
+    const scale = desiredMax / maxDim;
     model.scale.setScalar(scale);
+
+    // Recompute bounds after scaling
+    const box2 = new THREE.Box3().setFromObject(model);
+    const center2 = box2.getCenter(new THREE.Vector3());
+    const min2 = box2.min;
+
+    // Center X/Z and lift so feet rest at y=0
+    model.position.set(-center2.x, -min2.y, -center2.z);
 
     // Collect all meshes with morph targets
     const meshes: THREE.Mesh[] = [];
@@ -98,8 +103,26 @@ function CharacterModel({
       meshes
     });
 
-    setIsReady(true);
-  }, [loadedScene, threeScene, onReady, isReady, onProgress]);
+    // Cleanup in case of remount (e.g., React StrictMode) to avoid duplicate models
+    return () => {
+      if (groupRef.current && modelRef.current) {
+        groupRef.current.remove(modelRef.current);
+      }
+      try {
+        modelRef.current?.traverse((node: any) => {
+          if (node.geometry) node.geometry.dispose?.();
+          if (node.material) {
+            if (Array.isArray(node.material)) {
+              node.material.forEach((m: any) => m.dispose?.());
+            } else {
+              node.material.dispose?.();
+            }
+          }
+        });
+      } catch {}
+      modelRef.current = null;
+    };
+  }, [loadedScene, threeScene, onReady, onProgress]);
 
   // Auto-rotate animation and engine updates
   useFrame((state, delta) => {
@@ -160,7 +183,8 @@ export function CharacterFiberScene({
   onProgress,
   className = '',
   skyboxUrl,
-  environmentPreset = 'studio'
+  environmentPreset = 'studio',
+  cameraOverride
 }: Props) {
   const [progress, setProgress] = useState(0);
 

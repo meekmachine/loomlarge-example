@@ -35,21 +35,23 @@ export class HairPhysicsAmmo {
   private velZ = 0;
 
   private config: HairPhysicsConfig = {
-    mass: 1.0,
-    damping: 0.3,
-    stiffness: 5.0,
-    gravity: 9.8,
-    headInfluence: 2.0,
+    mass: 0.9,
+    damping: 0.18,
+    stiffness: 7.5,
+    gravity: 12,
+    headInfluence: 3.5,
     // Wind defaults (disabled)
     windStrength: 0,
     windDirectionX: 1.0,  // Default: wind from left
     windDirectionZ: 0,
     windTurbulence: 0.3,
-    windFrequency: 2.0,
+    windFrequency: 1.4,
   };
 
   // Time accumulator for wind turbulence
   private windTime = 0;
+  private smoothedWindX = 0;
+  private smoothedWindZ = 0;
 
   private lastHeadYaw = 0;
   private lastHeadPitch = 0;
@@ -137,8 +139,21 @@ export class HairPhysicsAmmo {
       const crossWindX = -this.config.windDirectionZ * Math.sin(turbulencePhase) * this.config.windTurbulence * this.config.windStrength * 0.5;
       const crossWindZ = this.config.windDirectionX * Math.cos(turbulencePhase * 1.3) * this.config.windTurbulence * this.config.windStrength * 0.5;
 
-      windForceX = waveX + crossWindX;
-      windForceZ = waveZ + crossWindZ;
+      const targetWindX = waveX + crossWindX;
+      const targetWindZ = waveZ + crossWindZ;
+
+      // Smooth the gusts to avoid blocky changes
+      const smoothFactor = 1 - Math.exp(-dt * 8); // faster smoothing with smaller dt
+      this.smoothedWindX += (targetWindX - this.smoothedWindX) * smoothFactor;
+      this.smoothedWindZ += (targetWindZ - this.smoothedWindZ) * smoothFactor;
+
+      windForceX = this.smoothedWindX;
+      windForceZ = this.smoothedWindZ;
+    } else {
+      // Decay smoothed wind when disabled
+      const decay = Math.exp(-dt * 8);
+      this.smoothedWindX *= decay;
+      this.smoothedWindZ *= decay;
     }
 
     // Total acceleration (F = ma, so a = F/m)

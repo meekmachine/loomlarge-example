@@ -186,7 +186,19 @@ const colorToApply = isEyebrow ? state.eyebrowColor : state.hairColor
 - **State Updates**: Batched through XState machine to prevent excessive re-renders
 - **Material Reuse**: Modifies existing materials instead of creating new ones
 - **Wireframe Caching**: Stores wireframe references to avoid recreation
+- **Targeted Morph Writes**: Hair physics writes morphs only to registered hair meshes (not every mesh in the scene) to reduce per-frame cost
 - **Subscription Pattern**: UI only re-renders when subscribed state changes
+
+### Physics Defaults (Spring-Damper)
+
+- Stiffness: ~7.5
+- Damping: ~0.18
+- Inertia (head influence): ~3.5
+- Gravity: ~12
+- Response scale: ~2.5
+- Idle sway: ~0.12 amplitude at ~1.0 speed
+
+Defaults bias toward quicker response and less lag; wind defaults to off.
 
 ## Debugging
 
