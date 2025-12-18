@@ -9,6 +9,7 @@ import {
   CC4_MESHES,
   CONTINUUM_PAIRS_MAP,
   EYE_AXIS,
+  VISEME_KEYS,
   type CompositeRotation,
 } from './arkit/shapeDict';
 import { createAnimationService } from '../latticework/animation/animationService';
@@ -222,6 +223,9 @@ export class EngineThree {
       transitionAU: (id, v, dur) => this.transitionAU(id, v, dur),
       transitionMorph: (key, v, dur) => this.transitionMorph(key, v, dur),
       transitionContinuum: (negAU, posAU, v, dur) => this.transitionContinuum(negAU, posAU, v, dur),
+      // Viseme methods - separate from AU system with integrated jaw control
+      setViseme: (idx, v, jawScale) => this.setViseme(idx, v, jawScale),
+      transitionViseme: (idx, v, dur, jawScale) => this.transitionViseme(idx, v, dur, jawScale),
       onSnippetEnd: (name) => {
         try {
           window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
@@ -519,6 +523,128 @@ export class EngineThree {
       target,
       durationMs / 1000,
       (value) => this.setMorph(key, value)
+    );
+  };
+
+  // ============================================================================
+  // VISEME SYSTEM - Separate from AUs
+  // Visemes = morph target + jaw bone rotation (based on phonetic properties)
+  // ============================================================================
+
+  /**
+   * Jaw opening amounts for each viseme index (0-14)
+   * Based on phonetic properties - how much the jaw opens for each mouth shape
+   */
+  private visemeJawAmounts: number[] = [
+    0.2,  // 0: EE - minimal jaw, high front vowel
+    0.4,  // 1: Er - medium, r-colored
+    0.3,  // 2: IH - slight, high front
+    0.8,  // 3: Ah - wide open
+    0.7,  // 4: Oh - rounded, medium-wide
+    0.4,  // 5: W_OO - rounded, moderate
+    0.1,  // 6: S_Z - nearly closed, sibilants
+    0.2,  // 7: Ch_J - slight, postalveolar
+    0.15, // 8: F_V - nearly closed, labiodental
+    0.2,  // 9: TH - slight, dental
+    0.15, // 10: T_L_D_N - slight, alveolar
+    0.0,  // 11: B_M_P - fully closed, bilabial
+    0.3,  // 12: K_G_H_NG - medium, velar
+    0.6,  // 13: AE - medium open, neutral vowel
+    0.3,  // 14: R - retroflex, small
+  ];
+
+  /** Track current viseme values for transitions */
+  private visemeValues: number[] = new Array(15).fill(0);
+
+  /**
+   * Set viseme value immediately (no transition)
+   * Applies both viseme morph target AND jaw bone rotation
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param value - Target value in [0, 1]
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   */
+  setViseme = (visemeIndex: number, value: number, jawScale: number = 1.0) => {
+    if (visemeIndex < 0 || visemeIndex >= VISEME_KEYS.length) return;
+
+    const val = clamp01(value);
+    this.visemeValues[visemeIndex] = val;
+
+    // Apply viseme morph
+    const morphKey = VISEME_KEYS[visemeIndex];
+    this.setMorph(morphKey, val);
+
+    // Apply jaw bone rotation based on viseme type
+    const jawAmount = this.visemeJawAmounts[visemeIndex] * val * jawScale;
+    this.applyJawBoneRotation(jawAmount);
+  };
+
+  /**
+   * Apply jaw bone rotation directly (separate from AU system)
+   * Used by viseme system for phonetic jaw movement
+   */
+  private applyJawBoneRotation = (jawAmount: number) => {
+    const jawBone = this.bones.JAW;
+    if (!jawBone) return;
+
+    const clampedVal = clamp01(jawAmount);
+    // JAW bone rotates on rz axis - increased to 25 degrees for more expressive speech
+    // (was 14.6, AU 27 Mouth Stretch uses 18.25, allowing more range for visemes)
+    const maxDegrees = 25;
+    const radians = deg2rad(maxDegrees) * clampedVal;
+
+    // Apply rotation relative to base pose
+    const deltaQ = new THREE.Quaternion().setFromAxisAngle(Z_AXIS, radians);
+    jawBone.obj.quaternion.copy(jawBone.baseQuat).multiply(deltaQ);
+    jawBone.obj.updateMatrixWorld(false);
+  };
+
+  /**
+   * Get current combined jaw amount from all active visemes
+   * Sums weighted jaw contributions from each viseme
+   */
+  private getVisemeJawAmount = (jawScale: number): number => {
+    let totalJaw = 0;
+    for (let i = 0; i < this.visemeValues.length; i++) {
+      totalJaw += this.visemeValues[i] * this.visemeJawAmounts[i];
+    }
+    return Math.min(1, totalJaw * jawScale);
+  };
+
+  /**
+   * Smoothly transition a viseme value
+   * Applies both viseme morph target AND jaw bone rotation
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param to - Target value in [0, 1]
+   * @param durationMs - Transition duration in milliseconds (default: 80ms)
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   */
+  transitionViseme = (visemeIndex: number, to: number, durationMs = 80, jawScale: number = 1.0): TransitionHandle => {
+    if (visemeIndex < 0 || visemeIndex >= VISEME_KEYS.length) {
+      return { promise: Promise.resolve(), pause: () => {}, resume: () => {}, cancel: () => {} };
+    }
+
+    const transitionKey = `viseme_${visemeIndex}`;
+    const from = this.visemeValues[visemeIndex] ?? 0;
+    const target = clamp01(to);
+
+    return this.addTransition(
+      transitionKey,
+      from,
+      target,
+      durationMs / 1000,
+      (value) => {
+        this.visemeValues[visemeIndex] = value;
+
+        // Apply viseme morph
+        const morphKey = VISEME_KEYS[visemeIndex];
+        this.setMorph(morphKey, value);
+
+        // Apply combined jaw from all active visemes
+        const combinedJaw = this.getVisemeJawAmount(jawScale);
+        this.applyJawBoneRotation(combinedJaw);
+      }
     );
   };
 

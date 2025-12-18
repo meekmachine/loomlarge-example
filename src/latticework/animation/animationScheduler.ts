@@ -69,6 +69,7 @@ export function normalize(sn: any): Snippet & { curves: Record<string, Scheduler
       snippetPlaybackRate: sn.snippetPlaybackRate ?? 1,
       snippetIntensityScale: sn.snippetIntensityScale ?? 1,
       snippetBlendMode: sn.snippetBlendMode ?? 'replace',  // Default to 'replace' for backward compatibility
+      snippetJawScale: sn.snippetJawScale ?? 1.0,  // Jaw bone activation for viseme snippets
       curves
     } as any;
   }
@@ -100,6 +101,7 @@ export function normalize(sn: any): Snippet & { curves: Record<string, Scheduler
     snippetPlaybackRate: sn.snippetPlaybackRate ?? 1,
     snippetIntensityScale: sn.snippetIntensityScale ?? 1,
     snippetBlendMode: sn.snippetBlendMode ?? 'replace',
+    snippetJawScale: sn.snippetJawScale ?? 1.0,
     curves
   } as any;
 }
@@ -313,12 +315,17 @@ export class AnimationScheduler {
           const isVisemeIndex = isVisemeCategory && !Number.isNaN(numericId) && numericId >= 0 && numericId < VISEME_KEYS.length;
 
           if (isVisemeIndex) {
-            // Convert viseme index to morph name
-            const morphName = VISEME_KEYS[numericId];
-            if (this.host.transitionMorph) {
-              const handle = this.host.transitionMorph(morphName, targetValue, durationMs);
+            // Use transitionViseme for proper jaw bone coordination
+            // Get jawScale from snippet metadata (defaults to 1.0)
+            const jawScale = (sn as any).snippetJawScale ?? 1.0;
+            if (this.host.transitionViseme) {
+              const handle = this.host.transitionViseme(numericId, targetValue, durationMs, jawScale);
               handles.push(handle);
+            } else if (this.host.setViseme) {
+              this.host.setViseme(numericId, targetValue, jawScale);
             } else {
+              // Fallback to morph only (no jaw)
+              const morphName = VISEME_KEYS[numericId];
               this.host.setMorph(morphName, targetValue);
             }
             continue;
@@ -688,11 +695,12 @@ export class AnimationScheduler {
     });
   }
 
-  /** Apply morph targets that correspond to visemes so continuum logic only sees AU targets.
-   * @param immediate - If true, use setMorph for instant updates (scrubbing).
+  /** Apply viseme targets with jaw bone coordination.
+   * @param immediate - If true, use setViseme for instant updates (scrubbing).
    */
   private applyVisemeTargets(targets: Map<string, { v: number; pri: number; durMs: number; category: string }>, immediate = false) {
     const processedIds: string[] = [];
+    const jawScale = 1.0; // Could be made configurable
 
     targets.forEach((entry, curveId) => {
       const isVisemeCategory = entry.category === 'visemeSnippet' || entry.category === 'combined';
@@ -701,17 +709,30 @@ export class AnimationScheduler {
       const numericId = Number(curveId);
       const numericIsViseme = !Number.isNaN(numericId) && numericId >= 0 && numericId < VISEME_KEYS.length;
       const nameMatchIndex = VISEME_KEYS.indexOf(curveId);
-      const morphName = numericIsViseme
-        ? VISEME_KEYS[numericId]
-        : (nameMatchIndex >= 0 ? VISEME_KEYS[nameMatchIndex] : null);
 
-      if (!morphName) return; // Combined snippets can carry AU ids too - leave them for continuum logic
+      // Get viseme index (either from numeric ID or name lookup)
+      const visemeIndex = numericIsViseme ? numericId : (nameMatchIndex >= 0 ? nameMatchIndex : -1);
+
+      if (visemeIndex < 0) return; // Combined snippets can carry AU ids too - leave them for continuum logic
 
       const v = clamp01(entry.v);
       if (immediate) {
-        this.host.setMorph(morphName, v);
+        // Use setViseme for proper jaw coordination
+        if (this.host.setViseme) {
+          this.host.setViseme(visemeIndex, v, jawScale);
+        } else {
+          // Fallback to morph only
+          this.host.setMorph(VISEME_KEYS[visemeIndex], v);
+        }
       } else {
-        (this.host.transitionMorph ?? this.host.setMorph)?.(morphName, v, entry.durMs);
+        // Use transitionViseme for smooth animation with jaw
+        if (this.host.transitionViseme) {
+          this.host.transitionViseme(visemeIndex, v, entry.durMs, jawScale);
+        } else if (this.host.setViseme) {
+          this.host.setViseme(visemeIndex, v, jawScale);
+        } else {
+          this.host.setMorph(VISEME_KEYS[visemeIndex], v);
+        }
       }
       processedIds.push(curveId);
     });

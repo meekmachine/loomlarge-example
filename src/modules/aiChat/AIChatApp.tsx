@@ -217,7 +217,6 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
         onsetIntensity: 90,
         holdMs: 100,
         speechRate: 1.0,
-        jawActivation: 1.5,
         lipsyncIntensity: 1.0,
       },
       {}

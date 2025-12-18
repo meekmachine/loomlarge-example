@@ -55,6 +55,7 @@ function coerceSnippet(d: NonNullable<LoadAnimationEvent['data']>, playing: bool
     snippetPlaybackRate: rate,
     snippetIntensityScale: typeof d.snippetIntensityScale === 'number' ? d.snippetIntensityScale : 1,
     snippetBlendMode: (d as any).snippetBlendMode ?? 'replace',  // Default to 'replace'
+    snippetJawScale: typeof (d as any).snippetJawScale === 'number' ? (d as any).snippetJawScale : 1.0,  // Jaw bone activation for visemes
     snippetCategory: (d as any).snippetCategory ?? 'default',
     snippetPriority: typeof (d as any).snippetPriority === 'number' ? (d as any).snippetPriority : 0,
     currentTime: 0,

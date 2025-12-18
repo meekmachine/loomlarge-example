@@ -59,8 +59,8 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [status, setStatus] = useState('idle');
-  const [jawActivation, setJawActivation] = useState(1.5); // Default to 1.5x for more visible jaw movement
   const [lipsyncIntensity, setLipsyncIntensity] = useState(1.0);
+  const [jawScale, setJawScale] = useState(1.0);
 
   // Service references
   const ttsRef = useRef<TTSService | null>(null);
@@ -77,9 +77,9 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
     // Create LipSync service with animation service integration
     lipSyncRef.current = createLipSyncService(
       {
-        jawActivation,
         lipsyncIntensity,
         speechRate: rate,
+        jawScale,
       },
       {
         onSpeechStart: () => {
@@ -276,7 +276,7 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
       });
       prosodicSnippetsRef.current = [];
     };
-  }, [engine, anim, rate, jawActivation, lipsyncIntensity]);
+  }, [engine, anim, rate, lipsyncIntensity, jawScale]);
 
   // Update TTS config when parameters change
   useEffect(() => {
@@ -286,11 +286,11 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
     if (lipSyncRef.current) {
       lipSyncRef.current.updateConfig({
         speechRate: rate,
-        jawActivation,
         lipsyncIntensity,
+        jawScale,
       });
     }
-  }, [rate, pitch, volume, jawActivation, lipsyncIntensity]);
+  }, [rate, pitch, volume, lipsyncIntensity, jawScale]);
 
   // Update voice
   useEffect(() => {
@@ -434,27 +434,6 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
           </Slider>
         </Box>
 
-        {/* Jaw Activation Control */}
-        <Box>
-          <HStack justify="space-between" mb={1}>
-            <Text fontSize="xs">Jaw Activation</Text>
-            <Text fontSize="xs" fontWeight="bold">{jawActivation.toFixed(1)}x</Text>
-          </HStack>
-          <Slider
-            value={jawActivation}
-            onChange={setJawActivation}
-            min={0}
-            max={2.0}
-            step={0.1}
-            isDisabled={disabled || isSpeaking}
-          >
-            <SliderTrack>
-              <SliderFilledTrack bg="orange.400" />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
-        </Box>
-
         {/* Lipsync Intensity Control */}
         <Box>
           <HStack justify="space-between" mb={1}>
@@ -471,6 +450,27 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
           >
             <SliderTrack>
               <SliderFilledTrack bg="pink.400" />
+            </SliderTrack>
+            <SliderThumb />
+          </Slider>
+        </Box>
+
+        {/* Jaw Bone Activation Control */}
+        <Box>
+          <HStack justify="space-between" mb={1}>
+            <Text fontSize="xs">Jaw Activation</Text>
+            <Text fontSize="xs" fontWeight="bold">{jawScale.toFixed(1)}x</Text>
+          </HStack>
+          <Slider
+            value={jawScale}
+            onChange={setJawScale}
+            min={0}
+            max={2.0}
+            step={0.1}
+            isDisabled={disabled || isSpeaking}
+          >
+            <SliderTrack>
+              <SliderFilledTrack bg="orange.400" />
             </SliderTrack>
             <SliderThumb />
           </Slider>

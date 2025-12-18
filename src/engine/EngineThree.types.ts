@@ -88,14 +88,39 @@ export interface Engine {
 
   /**
    * Transition morph value smoothly over duration
-   * Used for visemes and custom morph targets
+   * Used for custom morph targets (NOT visemes - use transitionViseme for those)
    *
-   * @param name - Morph target name (e.g., 'jawOpen', 'aa', 'ee')
+   * @param name - Morph target name (e.g., 'Brow_Raise_Inner_L')
    * @param value - Target value in [0, 1]
    * @param durationMs - Transition duration in milliseconds (default: 80ms)
    * @returns TransitionHandle with { promise, pause, resume, cancel }
    */
   transitionMorph?: (name: string, value: number, durationMs?: number) => TransitionHandle;
+
+  /**
+   * Set viseme value immediately (no transition)
+   * Applies both viseme morph target AND jaw bone rotation
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param value - Target value in [0, 1]
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   */
+  setViseme?: (visemeIndex: number, value: number, jawScale?: number) => void;
+
+  /**
+   * Transition viseme smoothly over duration
+   * Applies both viseme morph target AND jaw bone rotation with smooth interpolation
+   *
+   * Visemes are separate from AUs - they have their own morph targets (EE, Ah, Oh, etc.)
+   * plus coordinated jaw bone movement based on phonetic properties.
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param value - Target value in [0, 1]
+   * @param durationMs - Transition duration in milliseconds (default: 80ms)
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
+   */
+  transitionViseme?: (visemeIndex: number, value: number, durationMs?: number, jawScale?: number) => TransitionHandle;
 
   /**
    * Transition a continuum AU pair (e.g., eyes left/right, head up/down).

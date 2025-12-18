@@ -34,12 +34,12 @@ export interface LipSyncHostCaps {
  * Default configuration
  */
 const DEFAULT_CONFIG: Required<LipSyncConfig> = {
-  jawActivation: 1.0,
   lipsyncIntensity: 1.0,
   speechRate: 1.0,
   onsetIntensity: 90,
   holdMs: 140,
   engine: 'webSpeech',
+  jawScale: 1.0,
 };
 
 /**
@@ -59,7 +59,6 @@ export function createLipSyncService(
   const machine = createActor(lipSyncMachine, {
     input: {
       config: {
-        jawActivation: fullConfig.jawActivation,
         lipsyncIntensity: fullConfig.lipsyncIntensity,
         speechRate: fullConfig.speechRate,
       },
@@ -94,9 +93,9 @@ export function createLipSyncService(
     machine,
     host,
     {
-      jawActivation: fullConfig.jawActivation,
       lipsyncIntensity: fullConfig.lipsyncIntensity,
       speechRate: fullConfig.speechRate,
+      jawScale: fullConfig.jawScale,
     }
   );
 
@@ -159,17 +158,16 @@ export function createLipSyncService(
       machine.send({
         type: 'UPDATE_CONFIG',
         config: {
-          jawActivation: fullConfig.jawActivation,
           lipsyncIntensity: fullConfig.lipsyncIntensity,
           speechRate: fullConfig.speechRate,
-        } as Partial<import('./lipSyncScheduler').LipSyncSchedulerConfig>,
+        },
       });
 
       // Update scheduler config
       const schedulerConfig: Partial<import('./lipSyncScheduler').LipSyncSchedulerConfig> = {
-        jawActivation: fullConfig.jawActivation,
         lipsyncIntensity: fullConfig.lipsyncIntensity,
         speechRate: fullConfig.speechRate,
+        jawScale: fullConfig.jawScale,
       };
       scheduler.updateConfig(schedulerConfig);
     },

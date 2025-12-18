@@ -32,9 +32,9 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
   22: ['Mouth_Funnel'],
   23: ['Mouth_Press_L','Mouth_Press_R'],
   24: ['Mouth_Press_L','Mouth_Press_R'],
-  25: [],  // Lips Part - BONE ONLY (apply Jaw_Open morph separately if needed)
-  26: [],  // Jaw Drop - BONE ONLY (visemes apply their own morphs, then call this for bone rotation)
-  27: [],  // Mouth Stretch - BONE ONLY (apply morphs separately)
+  25: ['Jaw_Open'],  // Lips Part - small jaw open with morph
+  26: ['Jaw_Open'],  // Jaw Drop - mixed: bone rotation + Jaw_Open morph
+  27: ['Jaw_Open'],  // Mouth Stretch - larger jaw open with morph
   28: ['Mouth_Roll_In_Upper','Mouth_Roll_In_Lower'],
 
   // Tongue
@@ -47,8 +47,8 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
 
   // Jaw / Head (convenience)
   29: ['Jaw_Forward'],
-  30: [],  // Jaw Left - BONE ONLY (apply Jaw_L morph separately if needed)
-  35: [],  // Jaw Right - BONE ONLY (apply Jaw_R morph separately if needed)
+  30: ['Jaw_L'],  // Jaw Left - mixed: bone rotation + Jaw_L morph
+  35: ['Jaw_R'],  // Jaw Right - mixed: bone rotation + Jaw_R morph
   31: ['Head_Turn_L'],
   32: ['Head_Turn_R'],
   33: ['Head_Turn_Up'],
@@ -332,7 +332,8 @@ export const AU_INFO: Record<string, AUInfo> = {
 export const AU_MIX_DEFAULTS: Record<number, number> = {
   31: 0.7, 32: 0.7, 33: 0.7, 54: 0.7, 55: 0.7, 56: 0.7,  // head
   61: 0.5, 62: 0.5, 63: 0.5, 64: 0.5,  // eyes
-  26: 0.8,  // jaw
+  25: 0.5, 26: 0.5, 27: 0.5,  // jaw open (lips part, jaw drop, mouth stretch)
+  30: 0.5, 35: 0.5,  // jaw left/right
 };
 
 // ============================================================================

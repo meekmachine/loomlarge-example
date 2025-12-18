@@ -1,19 +1,19 @@
 /**
  * LipSync Scheduler
- * Handles viseme timeline processing, curve building, jaw coordination, and animation scheduling
+ * Handles viseme timeline processing, curve building, and animation scheduling
  * Follows the Animation Agency pattern
  *
  * Uses a simple, sequential viseme pattern matching the working snippet files:
  * - Each viseme has a simple 4-keyframe envelope (ramp up → hold → hold → ramp down)
  * - No overlapping/coarticulation - cleaner, more predictable results
- * - Jaw follows phoneme timing
+ * - Viseme morphs include mouth opening - no separate jaw AU needed
  */
 
 import type { LipSyncSnippet } from './lipSyncMachine';
 import type { VisemeEvent } from './types';
 import { phonemeExtractor } from './PhonemeExtractor';
 import { visemeMapper } from './VisemeMapper';
-import { getARKitVisemeIndex, getJawAmountForViseme } from './visemeToARKit';
+import { getARKitVisemeIndex } from './visemeToARKit';
 
 export interface LipSyncHostCaps {
   scheduleSnippet: (snippet: any) => string | null;
@@ -21,9 +21,9 @@ export interface LipSyncHostCaps {
 }
 
 export interface LipSyncSchedulerConfig {
-  jawActivation: number;
   lipsyncIntensity: number;
   speechRate: number;
+  jawScale: number;
 }
 
 export class LipSyncScheduler {
@@ -34,14 +34,14 @@ export class LipSyncScheduler {
   constructor(
     machine: any,
     host: LipSyncHostCaps,
-    config: Partial<LipSyncSchedulerConfig> & Pick<LipSyncSchedulerConfig, 'jawActivation' | 'lipsyncIntensity' | 'speechRate'>
+    config: Partial<LipSyncSchedulerConfig> & Pick<LipSyncSchedulerConfig, 'lipsyncIntensity' | 'speechRate'>
   ) {
     this.machine = machine;
     this.host = host;
     this.config = {
-      jawActivation: config.jawActivation,
       lipsyncIntensity: config.lipsyncIntensity,
       speechRate: config.speechRate,
+      jawScale: config.jawScale ?? 1.0,
     };
   }
 
@@ -65,10 +65,11 @@ export class LipSyncScheduler {
       curves,
       maxTime,
       loop: false,
-      snippetCategory: 'combined', // Combined visemes + AU (jaw)
+      snippetCategory: 'visemeSnippet', // Viseme morphs only - no AUs
       snippetPriority: 50, // High priority (overrides emotions)
       snippetPlaybackRate: this.config.speechRate,
       snippetIntensityScale: 1.0,
+      snippetJawScale: this.config.jawScale, // Jaw bone activation multiplier
     };
 
     // Schedule to animation service
@@ -161,62 +162,7 @@ export class LipSyncScheduler {
       );
     });
 
-    // Add jaw coordination (AU 26)
-    this.addJawCurves(curves, visemeTimeline);
-
     return curves;
-  }
-
-  /**
-   * Add jaw (AU 26) curves coordinated with visemes
-   * Builds a continuous jaw curve that follows the phoneme sequence
-   */
-  private addJawCurves(
-    curves: Record<string, Array<{ time: number; intensity: number }>>,
-    visemeTimeline: VisemeEvent[]
-  ): void {
-    const jawCurve: Array<{ time: number; intensity: number }> = [];
-
-    // Start with jaw closed
-    if (visemeTimeline.length > 0) {
-      jawCurve.push({ time: 0, intensity: 0 });
-    }
-
-    visemeTimeline.forEach((visemeEvent, idx) => {
-      const startTime = visemeEvent.offsetMs / 1000;
-      const duration = visemeEvent.durationMs / 1000;
-      const endTime = startTime + duration;
-
-      // Skip silence visemes for jaw
-      if (visemeEvent.visemeId === 0) return;
-
-      // Get jaw amount for this viseme (0-1 scale)
-      const jawAmount = getJawAmountForViseme(visemeEvent.visemeId);
-
-      // Calculate jaw intensity (scaled by config)
-      // Match the snippet pattern where jaw values are typically 15-70 range
-      const jawIntensity = jawAmount * 100 * this.config.jawActivation;
-
-      // Add jaw keyframes - simpler pattern matching snippets
-      const rampTime = 0.02;
-      jawCurve.push(
-        { time: startTime + rampTime, intensity: jawIntensity },
-        { time: endTime - rampTime, intensity: jawIntensity }
-      );
-    });
-
-    // End with jaw closed
-    if (visemeTimeline.length > 0) {
-      const lastViseme = visemeTimeline[visemeTimeline.length - 1];
-      const endTime = (lastViseme.offsetMs + lastViseme.durationMs) / 1000;
-      jawCurve.push({ time: endTime, intensity: 0 });
-    }
-
-    if (jawCurve.length > 0) {
-      // Sort by time and remove any duplicates
-      jawCurve.sort((a, b) => a.time - b.time);
-      curves['26'] = jawCurve;
-    }
   }
 
   /**
@@ -234,18 +180,19 @@ export class LipSyncScheduler {
 
   /**
    * Schedule neutral return snippet
-   * Smoothly transitions all active visemes and jaw back to closed/neutral
+   * Smoothly transitions all active visemes back to closed/neutral
    */
   public scheduleNeutralReturn(): void {
     const neutralSnippet = {
       name: `neutral_${Date.now()}`,
       curves: this.buildNeutralCurves(),
-      maxTime: 0.15, // Faster return to neutral (was 0.3)
+      maxTime: 0.15, // Faster return to neutral
       loop: false,
-      snippetCategory: 'combined',
+      snippetCategory: 'visemeSnippet', // Viseme morphs only
       snippetPriority: 60, // Higher priority than lipsync (50) to ensure closure
       snippetPlaybackRate: 1.0,
       snippetIntensityScale: 1.0,
+      snippetJawScale: this.config.jawScale, // Jaw bone activation multiplier
     };
 
     const scheduledName = this.host.scheduleSnippet(neutralSnippet);
@@ -259,7 +206,7 @@ export class LipSyncScheduler {
   }
 
   /**
-   * Build neutral curves (all visemes and jaw to 0)
+   * Build neutral curves (all visemes to 0)
    * Uses 'inherit' flag so the animation system starts from current values
    */
   private buildNeutralCurves(): Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> {
@@ -274,12 +221,6 @@ export class LipSyncScheduler {
         { time: closeDuration, intensity: 0 },      // End at 0
       ];
     }
-
-    // Add jaw closure (AU 26)
-    neutralCurves['26'] = [
-      { time: 0.0, intensity: 0, inherit: true }, // Start from current value
-      { time: closeDuration, intensity: 0 },      // End at 0
-    ];
 
     return neutralCurves;
   }
