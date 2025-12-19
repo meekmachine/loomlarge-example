@@ -23,7 +23,6 @@ export interface LipSyncContext {
   isSpeaking: boolean;
   wordCount: number;
   config: {
-    jawActivation: number;
     lipsyncIntensity: number;
     speechRate: number;
   };
@@ -54,7 +53,6 @@ export const lipSyncMachine = createMachine({
     isSpeaking: false,
     wordCount: 0,
     config: {
-      jawActivation: 1.5,
       lipsyncIntensity: 1.0,
       speechRate: 1.0,
     },

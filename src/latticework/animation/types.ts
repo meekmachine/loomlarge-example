@@ -59,6 +59,15 @@ export type Snippet = {
    */
   snippetBlendMode?: 'replace' | 'additive';
 
+  /**
+   * Jaw bone activation multiplier for viseme snippets.
+   * Controls how much the jaw bone moves during lip-sync.
+   * - 0 = no jaw movement
+   * - 1.0 = default jaw movement
+   * - 2.0 = exaggerated jaw movement
+   */
+  snippetJawScale?: number;
+
   // Mixer (AnimationMixer) metadata for clip-backed blending
   mixerChannel?: string;
   mixerBlendMode?: MixerBlendMode;
@@ -92,6 +101,7 @@ export type NormalizedSnippet = {
   snippetCategory: 'auSnippet' | 'visemeSnippet' | 'default';
   snippetPriority: number;
   snippetBlendMode: 'replace' | 'additive';  // Blend mode for AU combination
+  snippetJawScale: number;  // Jaw bone activation multiplier for viseme snippets
 
   // Mixer (AnimationMixer) metadata
   mixerChannel?: string;
@@ -182,6 +192,12 @@ export interface SetLoopStateEvent {
   localTime?: number;
 }
 
+export interface SeekSnippetEvent {
+  type: 'SEEK_SNIPPET';
+  name: string;
+  time: number;
+}
+
 export type AnimEvent =
   | LoadAnimationEvent
   | RemoveAnimationEvent
@@ -194,7 +210,8 @@ export type AnimEvent =
   | ManualSetEvent
   | ManualClearEvent
   | SnippetLoopEvent
-  | SetLoopStateEvent;
+  | SetLoopStateEvent
+  | SeekSnippetEvent;
 
 // ---------- Scheduler plumbing ----------
 export type RuntimeSched = { name: string; startsAt: number; offset: number; enabled: boolean };

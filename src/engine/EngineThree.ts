@@ -8,8 +8,12 @@ import {
   CC4_EYE_MESH_NODES,
   CC4_MESHES,
   CONTINUUM_PAIRS_MAP,
+  EYE_AXIS,
+  VISEME_KEYS,
   type CompositeRotation,
 } from './arkit/shapeDict';
+import { createAnimationService } from '../latticework/animation/animationService';
+import type { Engine } from './EngineThree.types';
 
 // ============================================================================
 // DERIVED CONSTANTS - computed from shapeDict core data
@@ -18,11 +22,8 @@ import {
 /** All AU IDs that have bone bindings */
 export const BONE_DRIVEN_AUS = new Set(Object.keys(BONE_AU_TO_BINDINGS).map(Number));
 
-/** Eye axis override for CC rigs (eyes rotate around Z for yaw) */
-export const EYE_AXIS = {
-  yaw: 'rz' as 'ry' | 'rz',
-  pitch: 'rx' as 'rx' | 'ry' | 'rz'
-};
+// Re-export from shapeDict for backwards compatibility
+export { EYE_AXIS, CONTINUUM_PAIRS_MAP };
 
 /** AUs that have both morphs and bones - can blend between them */
 export const MIXED_AUS = new Set(
@@ -107,6 +108,57 @@ type Transition = {
   apply: (value: number) => void;
   easing: (t: number) => number;
   resolve?: () => void;  // Called when transition completes
+  paused: boolean;       // Individual pause state
+};
+
+/**
+ * TransitionHandle - returned from transitionAU/transitionMorph/transitionContinuum
+ * Provides promise-based completion notification plus fine-grained control.
+ *
+ * The animation agency uses these handles to await keyframe transitions,
+ * then schedule the next keyframe when the promise resolves.
+ */
+export type TransitionHandle = {
+  /** Resolves when the transition completes (or is cancelled) */
+  promise: Promise<void>;
+  /** Pause this transition (holds at current value) */
+  pause: () => void;
+  /** Resume this transition after pause */
+  resume: () => void;
+  /** Cancel this transition immediately (resolves promise) */
+  cancel: () => void;
+};
+
+// Optimized transition types - pre-resolved targets for direct access
+type MorphTarget = {
+  mesh: THREE.Mesh;
+  index: number;
+  key: string;
+};
+
+type BoneTarget = {
+  bone: NodeBase;
+  node: string;
+  channel: 'rx' | 'ry' | 'rz' | 'tx' | 'ty' | 'tz';
+  scale: number;
+  maxDegrees?: number;
+  maxUnits?: number;
+};
+
+type ResolvedAUTargets = {
+  auId: number;
+  morphTargets: MorphTarget[];
+  boneTargets: BoneTarget[];
+  mixWeight: number;
+  compositeInfo: {
+    nodes: CompositeRotation['node'][];
+    axis: 'pitch' | 'yaw' | 'roll';
+  } | null;
+};
+
+type OptimizedTransition = {
+  key: string;
+  resolved: ResolvedAUTargets;
 };
 
 export class EngineThree {
@@ -125,6 +177,7 @@ export class EngineThree {
 
   // Skybox storage
   private scene: THREE.Scene | null = null;
+  private renderer: THREE.WebGLRenderer | null = null;
   private skyboxTexture: THREE.Texture | null = null;
 
   // Unified rotation state tracking for bones
@@ -144,6 +197,295 @@ export class EngineThree {
   private isPaused: boolean = false;
   private easeInOutQuad = (t:number) => (t<0.5? 2*t*t : -1+(4-2*t)*t);
 
+  // ============================================================================
+  // INTERNAL RAF LOOP - EngineThree owns the frame loop
+  // ============================================================================
+  private clock = new THREE.Clock();
+  private rafId: number | null = null;
+  private running = false;
+  private frameListeners = new Set<(dt: number) => void>();
+
+  /** Animation service - created lazily when start() is called */
+  private _anim: ReturnType<typeof createAnimationService> | null = null;
+
+  /** Get the animation service (creates it if needed) */
+  get anim(): ReturnType<typeof createAnimationService> {
+    if (!this._anim) {
+      this._anim = this.createAnimService();
+    }
+    return this._anim;
+  }
+
+  /** Create the animation service with this engine as the host */
+  private createAnimService(): ReturnType<typeof createAnimationService> {
+    const host: Engine = {
+      applyAU: (id, v) => this.setAU(id as number, v),
+      setMorph: (key, v) => this.setMorph(key, v),
+      transitionAU: (id, v, dur) => this.transitionAU(id, v, dur),
+      transitionMorph: (key, v, dur) => this.transitionMorph(key, v, dur),
+      transitionContinuum: (negAU, posAU, v, dur) => this.transitionContinuum(negAU, posAU, v, dur),
+      // Viseme methods - separate from AU system with integrated jaw control
+      setViseme: (idx, v, jawScale) => this.setViseme(idx, v, jawScale),
+      transitionViseme: (idx, v, dur, jawScale) => this.transitionViseme(idx, v, dur, jawScale),
+      onSnippetEnd: (name) => {
+        try {
+          window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
+        } catch {}
+        try {
+          (window as any).__lastSnippetEnded = name;
+        } catch {}
+      }
+    };
+    const svc = createAnimationService(host);
+    (window as any).anim = svc; // dev handle
+    return svc;
+  }
+
+  /** Subscribe to frame updates. Returns an unsubscribe function. */
+  addFrameListener(callback: (dt: number) => void): () => void {
+    this.frameListeners.add(callback);
+    return () => this.frameListeners.delete(callback);
+  }
+
+  /** Start the internal RAF loop */
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.clock.start();
+
+    // Ensure anim service exists (initializes scheduler and machine)
+    this.anim;
+
+    const tick = () => {
+      if (!this.running) return;
+      const dt = this.clock.getDelta();
+
+      // NOTE: step(dt) polling is DISABLED - promise-based playback runners now handle
+      // keyframe transitions. The runners fire transitions at keyframe boundaries and
+      // await TransitionHandle.promise before scheduling the next keyframe.
+      // The step(dt) method still exists in scheduler for backwards compatibility
+      // (e.g., flushOnce for scrubbing) but is not called from the RAF loop.
+
+      // Notify frame listeners
+      this.frameListeners.forEach((fn) => {
+        try { fn(dt); } catch {}
+      });
+
+      // Update transitions, mixers, mouse tracking
+      this.update(dt);
+
+      this.rafId = requestAnimationFrame(tick);
+    };
+
+    this.rafId = requestAnimationFrame(tick);
+  }
+
+  /** Stop the internal RAF loop */
+  stop() {
+    this.running = false;
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    this.clock.stop();
+  }
+
+  /** Check if the engine loop is running */
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  /** Dispose the engine and animation service */
+  dispose() {
+    this.stop();
+    try {
+      this._anim?.dispose?.();
+    } catch {}
+    this._anim = null;
+  }
+
+  // ============================================================================
+  // OPTIMIZED TRANSITION SYSTEM
+  // Pre-resolves morph indices and bone references at transition creation time
+  // ============================================================================
+
+  // Cache: morph key → array of { mesh, index } for direct access
+  private morphIndexCache = new Map<string, Array<{ mesh: THREE.Mesh; index: number }>>();
+
+  // Pre-resolved transition targets for optimized AU transitions
+  private optimizedTransitions = new Map<string, OptimizedTransition>();
+
+  /** Build the morph index cache after meshes are loaded */
+  private buildMorphIndexCache() {
+    this.morphIndexCache.clear();
+
+    for (const mesh of this.meshes) {
+      const dict = (mesh as any).morphTargetDictionary as Record<string, number> | undefined;
+      if (!dict) continue;
+
+      for (const [key, index] of Object.entries(dict)) {
+        let entries = this.morphIndexCache.get(key);
+        if (!entries) {
+          entries = [];
+          this.morphIndexCache.set(key, entries);
+        }
+        entries.push({ mesh, index });
+      }
+    }
+
+    console.log(`[EngineThree] Built morph index cache: ${this.morphIndexCache.size} unique morph keys`);
+  }
+
+  /**
+   * Resolve all targets for an AU transition upfront.
+   * Returns morph targets with direct mesh/index access and bone rotation configs.
+   */
+  private resolveAUTargets(auId: number): ResolvedAUTargets | null {
+    const morphKeys = AU_TO_MORPHS[auId] || [];
+    const boneBindings = BONE_AU_TO_BINDINGS[auId] || [];
+    const mixWeight = MIXED_AUS.has(auId) ? this.getAUMixWeight(auId) : 1.0;
+
+    // Resolve morph targets to direct mesh/index references
+    const morphTargets: MorphTarget[] = [];
+    for (const key of morphKeys) {
+      const entries = this.morphIndexCache.get(key);
+      if (entries) {
+        for (const { mesh, index } of entries) {
+          // Skip occlusion and tearline meshes
+          const name = (mesh.name || '').toLowerCase();
+          if (name.includes('occlusion') || name.includes('tearline')) continue;
+          morphTargets.push({ mesh, index, key });
+        }
+      }
+    }
+
+    // Resolve bone targets to direct bone references
+    const boneTargets: BoneTarget[] = [];
+    for (const binding of boneBindings) {
+      const boneEntry = this.bones[binding.node as BoneKeys];
+      if (boneEntry) {
+        boneTargets.push({
+          bone: boneEntry,
+          node: binding.node,
+          channel: binding.channel,
+          scale: binding.scale,
+          maxDegrees: binding.maxDegrees,
+          maxUnits: binding.maxUnits
+        });
+      }
+    }
+
+    // Check if this AU is part of a composite rotation
+    const compositeInfo = AU_TO_COMPOSITE_MAP.get(auId);
+
+    return {
+      auId,
+      morphTargets,
+      boneTargets,
+      mixWeight,
+      compositeInfo: compositeInfo || null
+    };
+  }
+
+  /**
+   * OPTIMIZED: Smoothly tween an AU using pre-resolved targets.
+   * Morph indices and bone references are resolved once at creation time,
+   * then applied directly each tick without lookups.
+   */
+  transitionAUOptimized = (id: number | string, to: number, durationMs = 200): TransitionHandle => {
+    const numId = typeof id === 'string' ? Number(id.replace(/[^\d]/g, '')) : id;
+    const transitionKey = `au_opt_${numId}`;
+    const from = this.auValues[numId] ?? 0;
+    const target = clamp01(to);
+
+    // Resolve all targets upfront
+    const resolved = this.resolveAUTargets(numId);
+    if (!resolved) {
+      console.warn(`[EngineThree] Could not resolve targets for AU ${numId}`);
+      return { promise: Promise.resolve(), pause: () => {}, resume: () => {}, cancel: () => {} };
+    }
+
+    // Create the optimized apply function that uses direct references
+    const applyOptimized = (value: number) => {
+      // Update AU value for tracking
+      this.auValues[numId] = value;
+
+      // Apply morphs directly (with mix weight)
+      const morphValue = value * resolved.mixWeight;
+      for (const { mesh, index } of resolved.morphTargets) {
+        const influences = mesh.morphTargetInfluences;
+        if (influences) {
+          influences[index] = morphValue;
+        }
+      }
+
+      // Handle bone rotations
+      if (resolved.compositeInfo) {
+        // Composite rotation: update rotation state and mark for flush
+        for (const nodeKey of resolved.compositeInfo.nodes) {
+          const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
+          if (!config) continue;
+
+          const axisConfig = config[resolved.compositeInfo.axis];
+          if (!axisConfig) continue;
+
+          // Calculate axis value
+          let axisValue = 0;
+          if (axisConfig.negative !== undefined && axisConfig.positive !== undefined) {
+            const negValue = this.auValues[axisConfig.negative] ?? 0;
+            const posValue = this.auValues[axisConfig.positive] ?? 0;
+            axisValue = posValue - negValue;
+          } else if (axisConfig.aus.length > 1) {
+            axisValue = Math.max(...axisConfig.aus.map(auId => this.auValues[auId] ?? 0));
+          } else {
+            axisValue = value;
+          }
+
+          // Update rotation state
+          this.rotations[nodeKey][resolved.compositeInfo.axis] = Math.max(-1, Math.min(1, axisValue));
+          this.pendingCompositeNodes.add(nodeKey);
+        }
+      } else {
+        // Non-composite: apply bones directly
+        for (const boneTarget of resolved.boneTargets) {
+          this.applyBoneTargetDirect(boneTarget, value);
+        }
+      }
+    };
+
+    return this.addTransition(
+      transitionKey,
+      from,
+      target,
+      durationMs / 1000,
+      applyOptimized
+    );
+  };
+
+  /** Apply a single bone target directly (for non-composite bones) */
+  private applyBoneTargetDirect(target: BoneTarget, value: number) {
+    const { bone, channel, scale, maxDegrees, maxUnits } = target;
+    const { obj, basePos, baseQuat } = bone;
+
+    const clampedVal = Math.min(1, Math.max(-1, value));
+    const radians = maxDegrees ? deg2rad(maxDegrees) * clampedVal * scale : 0;
+    const units = maxUnits ? maxUnits * clampedVal * scale : 0;
+
+    obj.position.copy(basePos);
+
+    if (channel === 'rx' || channel === 'ry' || channel === 'rz') {
+      const axis = channel === 'rx' ? X_AXIS : channel === 'ry' ? Y_AXIS : Z_AXIS;
+      const deltaQ = new THREE.Quaternion().setFromAxisAngle(axis, radians);
+      obj.quaternion.copy(baseQuat).multiply(deltaQ);
+    } else {
+      const dir = channel === 'tx' ? X_AXIS.clone() : channel === 'ty' ? Y_AXIS.clone() : Z_AXIS.clone();
+      dir.applyQuaternion(baseQuat);
+      obj.position.copy(basePos).add(dir.multiplyScalar(units));
+    }
+
+    obj.updateMatrixWorld(false);
+  }
+
   // No constructor needed - all state is initialized inline
 
   private getMorphValue(key: string): number {
@@ -157,13 +499,13 @@ export class EngineThree {
     return 0;
   }
   /** Smoothly tween an AU to a target value */
-  transitionAU = (id: number | string, to: number, durationMs = 200): Promise<void> => {
+  transitionAU = (id: number | string, to: number, durationMs = 200): TransitionHandle => {
     const numId = typeof id === 'string' ? Number(id.replace(/[^\d]/g, '')) : id;
-    const key = this.getAUDriverKey(numId);
+    const transitionKey = `au_${numId}`;
     const from = this.auValues[numId] ?? 0;
     const target = clamp01(to);
     return this.addTransition(
-      key,
+      transitionKey,
       from,
       target,
       durationMs / 1000,
@@ -172,16 +514,138 @@ export class EngineThree {
   };
 
   /** Smoothly tween a morph to a target value */
-  transitionMorph = (key: string, to: number, durationMs = 120): Promise<void> => {
-    const driverKey = this.getMorphDriverKey(key);
+  transitionMorph = (key: string, to: number, durationMs = 120): TransitionHandle => {
+    const transitionKey = `morph_${key}`;
     const from = this.getMorphValue(key);
     const target = clamp01(to);
     return this.addTransition(
-      driverKey,
+      transitionKey,
       from,
       target,
       durationMs / 1000,
       (value) => this.setMorph(key, value)
+    );
+  };
+
+  // ============================================================================
+  // VISEME SYSTEM - Separate from AUs
+  // Visemes = morph target + jaw bone rotation (based on phonetic properties)
+  // ============================================================================
+
+  /**
+   * Jaw opening amounts for each viseme index (0-14)
+   * Based on phonetic properties - how much the jaw opens for each mouth shape
+   */
+  private visemeJawAmounts: number[] = [
+    0.2,  // 0: EE - minimal jaw, high front vowel
+    0.4,  // 1: Er - medium, r-colored
+    0.3,  // 2: IH - slight, high front
+    0.8,  // 3: Ah - wide open
+    0.7,  // 4: Oh - rounded, medium-wide
+    0.4,  // 5: W_OO - rounded, moderate
+    0.1,  // 6: S_Z - nearly closed, sibilants
+    0.2,  // 7: Ch_J - slight, postalveolar
+    0.15, // 8: F_V - nearly closed, labiodental
+    0.2,  // 9: TH - slight, dental
+    0.15, // 10: T_L_D_N - slight, alveolar
+    0.0,  // 11: B_M_P - fully closed, bilabial
+    0.3,  // 12: K_G_H_NG - medium, velar
+    0.6,  // 13: AE - medium open, neutral vowel
+    0.3,  // 14: R - retroflex, small
+  ];
+
+  /** Track current viseme values for transitions */
+  private visemeValues: number[] = new Array(15).fill(0);
+
+  /**
+   * Set viseme value immediately (no transition)
+   * Applies both viseme morph target AND jaw bone rotation
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param value - Target value in [0, 1]
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   */
+  setViseme = (visemeIndex: number, value: number, jawScale: number = 1.0) => {
+    if (visemeIndex < 0 || visemeIndex >= VISEME_KEYS.length) return;
+
+    const val = clamp01(value);
+    this.visemeValues[visemeIndex] = val;
+
+    // Apply viseme morph
+    const morphKey = VISEME_KEYS[visemeIndex];
+    this.setMorph(morphKey, val);
+
+    // Apply jaw bone rotation based on viseme type
+    const jawAmount = this.visemeJawAmounts[visemeIndex] * val * jawScale;
+    this.applyJawBoneRotation(jawAmount);
+  };
+
+  /**
+   * Apply jaw bone rotation directly (separate from AU system)
+   * Used by viseme system for phonetic jaw movement
+   */
+  private applyJawBoneRotation = (jawAmount: number) => {
+    const jawBone = this.bones.JAW;
+    if (!jawBone) return;
+
+    const clampedVal = clamp01(jawAmount);
+    // JAW bone rotates on rz axis - increased to 25 degrees for more expressive speech
+    // (was 14.6, AU 27 Mouth Stretch uses 18.25, allowing more range for visemes)
+    const maxDegrees = 25;
+    const radians = deg2rad(maxDegrees) * clampedVal;
+
+    // Apply rotation relative to base pose
+    const deltaQ = new THREE.Quaternion().setFromAxisAngle(Z_AXIS, radians);
+    jawBone.obj.quaternion.copy(jawBone.baseQuat).multiply(deltaQ);
+    jawBone.obj.updateMatrixWorld(false);
+  };
+
+  /**
+   * Get current combined jaw amount from all active visemes
+   * Sums weighted jaw contributions from each viseme
+   */
+  private getVisemeJawAmount = (jawScale: number): number => {
+    let totalJaw = 0;
+    for (let i = 0; i < this.visemeValues.length; i++) {
+      totalJaw += this.visemeValues[i] * this.visemeJawAmounts[i];
+    }
+    return Math.min(1, totalJaw * jawScale);
+  };
+
+  /**
+   * Smoothly transition a viseme value
+   * Applies both viseme morph target AND jaw bone rotation
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param to - Target value in [0, 1]
+   * @param durationMs - Transition duration in milliseconds (default: 80ms)
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   */
+  transitionViseme = (visemeIndex: number, to: number, durationMs = 80, jawScale: number = 1.0): TransitionHandle => {
+    if (visemeIndex < 0 || visemeIndex >= VISEME_KEYS.length) {
+      return { promise: Promise.resolve(), pause: () => {}, resume: () => {}, cancel: () => {} };
+    }
+
+    const transitionKey = `viseme_${visemeIndex}`;
+    const from = this.visemeValues[visemeIndex] ?? 0;
+    const target = clamp01(to);
+
+    return this.addTransition(
+      transitionKey,
+      from,
+      target,
+      durationMs / 1000,
+      (value) => {
+        this.visemeValues[visemeIndex] = value;
+
+        // Apply viseme morph
+        const morphKey = VISEME_KEYS[visemeIndex];
+        this.setMorph(morphKey, value);
+
+        // Apply combined jaw from all active visemes
+        const combinedJaw = this.getVisemeJawAmount(jawScale);
+        this.applyJawBoneRotation(combinedJaw);
+      }
     );
   };
 
@@ -225,7 +689,7 @@ export class EngineThree {
    * @param continuumValue - Target value from -1 (full negative) to +1 (full positive)
    * @param durationMs - Transition duration in milliseconds
    */
-  transitionContinuum = (negAU: number, posAU: number, continuumValue: number, durationMs = 200): Promise<void> => {
+  transitionContinuum = (negAU: number, posAU: number, continuumValue: number, durationMs = 200): TransitionHandle => {
     const target = Math.max(-1, Math.min(1, continuumValue));
     const driverKey = `continuum_${negAU}_${posAU}`;
 
@@ -279,11 +743,15 @@ export class EngineThree {
   /**
    * Tick all active transitions by dt seconds.
    * Applies eased interpolation and removes completed transitions.
+   * Respects individual transition pause state.
    */
   private tickTransitions(dt: number) {
     const completed: string[] = [];
 
     this.transitions.forEach((t, key) => {
+      // Skip paused transitions
+      if (t.paused) return;
+
       t.elapsed += dt;
       const progress = Math.min(t.elapsed / t.duration, 1.0);
       const easedProgress = t.easing(progress);
@@ -306,7 +774,7 @@ export class EngineThree {
   /**
    * Add or replace a transition for the given key.
    * If a transition with the same key exists, it is cancelled and replaced.
-   * @returns Promise that resolves when the transition completes
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
    */
   private addTransition(
     key: string,
@@ -315,7 +783,7 @@ export class EngineThree {
     durationSec: number,
     apply: (value: number) => void,
     easing: (t: number) => number = this.easeInOutQuad
-  ): Promise<void> {
+  ): TransitionHandle {
     // Cancel existing transition for this key
     const existing = this.transitions.get(key);
     if (existing?.resolve) {
@@ -325,11 +793,18 @@ export class EngineThree {
     // Instant transition if duration is 0 or values are equal
     if (durationSec <= 0 || Math.abs(to - from) < 1e-6) {
       apply(to);
-      return Promise.resolve();
+      return {
+        promise: Promise.resolve(),
+        pause: () => {},
+        resume: () => {},
+        cancel: () => {},
+      };
     }
 
-    return new Promise<void>((resolve) => {
-      this.transitions.set(key, {
+    let transitionObj: Transition | null = null;
+
+    const promise = new Promise<void>((resolve) => {
+      transitionObj = {
         key,
         from,
         to,
@@ -338,8 +813,29 @@ export class EngineThree {
         apply,
         easing,
         resolve,
-      });
+        paused: false,
+      };
+      this.transitions.set(key, transitionObj);
     });
+
+    return {
+      promise,
+      pause: () => {
+        const t = this.transitions.get(key);
+        if (t) t.paused = true;
+      },
+      resume: () => {
+        const t = this.transitions.get(key);
+        if (t) t.paused = false;
+      },
+      cancel: () => {
+        const t = this.transitions.get(key);
+        if (t) {
+          t.resolve?.();
+          this.transitions.delete(key);
+        }
+      },
+    };
   }
 
   /** Clear all running transitions (used when playback rate changes to prevent timing conflicts). */
@@ -368,13 +864,6 @@ export class EngineThree {
     return this.transitions.size;
   }
 
-  private getAUDriverKey(id: number) {
-    return `au_${id}`;
-  }
-
-  private getMorphDriverKey(key: string) {
-    return `morph_${key}`;
-  }
   private meshes: THREE.Mesh[] = [];
   private model: THREE.Object3D | null = null;
 
@@ -491,17 +980,22 @@ export class EngineThree {
 
   hasBoneBinding = (id: number) => BONE_DRIVEN_AUS.has(id);
 
-  onReady = ({ meshes, model, animations, scene, skyboxTexture }: {
+  onReady = ({ meshes, model, animations, scene, renderer, skyboxTexture }: {
     meshes: THREE.Mesh[];
     model?: THREE.Object3D;
     animations?: THREE.AnimationClip[];
     scene?: THREE.Scene;
+    renderer?: THREE.WebGLRenderer;
     skyboxTexture?: THREE.Texture;
   }) => {
     this.meshes = meshes;
 
-    // Store scene and skybox references
+    // Build morph index cache for optimized transitions
+    this.buildMorphIndexCache();
+
+    // Store scene, renderer, and skybox references
     if (scene) this.scene = scene;
+    if (renderer) this.renderer = renderer;
     if (skyboxTexture) this.skyboxTexture = skyboxTexture;
 
     if (model) {
@@ -510,6 +1004,9 @@ export class EngineThree {
       this.logResolvedOnce(this.bones);
       this.rigReady = true;
       this.missingBoneWarnings.clear();
+
+      // Set render order for proper layering (eyes behind hair)
+      this.setupMeshRenderOrder(model);
     }
 
     if (model && animations && animations.length) {
@@ -1062,6 +1559,47 @@ export class EngineThree {
   // ========================================
 
   /**
+   * Set up render order for all meshes to ensure proper layering.
+   * Eyes render first (behind), then face/body, then hair (on top).
+   * This prevents eyes from showing through transparent hair.
+   */
+  private setupMeshRenderOrder(model: THREE.Object3D) {
+    model.traverse((obj) => {
+      if (!(obj as THREE.Mesh).isMesh) return;
+      const mesh = obj as THREE.Mesh;
+      const name = mesh.name;
+
+      // Look up mesh category from CC4_MESHES
+      const info = CC4_MESHES[name];
+      const category = info?.category;
+
+      // Render order strategy:
+      // -10: Eyes, cornea (render first, behind everything)
+      //  -5: Eye occlusion, tear lines (close to eyes)
+      //   0: Body, face, teeth, tongue (default)
+      //   5: Eyebrows (above face)
+      //  10: Hair (render last, on top of everything)
+      switch (category) {
+        case 'eye':
+        case 'cornea':
+          mesh.renderOrder = -10;
+          break;
+        case 'eyeOcclusion':
+        case 'tearLine':
+          mesh.renderOrder = -5;
+          break;
+        case 'eyebrow':
+          mesh.renderOrder = 5;
+          break;
+        case 'hair':
+          mesh.renderOrder = 10;
+          break;
+        // body, teeth, tongue, etc. stay at default 0
+      }
+    });
+  }
+
+  /**
    * Apply color to a hair or eyebrow mesh
    */
   setHairColor(mesh: THREE.Mesh, baseColor: string, emissive: string, emissiveIntensity: number, isEyebrow: boolean = false) {
@@ -1082,9 +1620,8 @@ export class EngineThree {
       }
     });
 
-    // Set renderOrder: hair renders after eyebrows (higher value = later)
-    // This ensures hair can properly layer over eyebrows
-    mesh.renderOrder = isEyebrow ? 0 : 1;
+    // Set renderOrder: eyebrows=5, hair=10 (consistent with setupMeshRenderOrder)
+    mesh.renderOrder = isEyebrow ? 5 : 10;
   }
 
   /**
@@ -1137,8 +1674,8 @@ export class EngineThree {
 
       if (isMesh) {
         const mesh = obj as THREE.Mesh;
-        // Eyebrows render first (under), hair renders later (on top)
-        mesh.renderOrder = isEyebrow ? 0 : 1;
+        // Eyebrows=5, hair=10 (consistent with setupMeshRenderOrder)
+        mesh.renderOrder = isEyebrow ? 5 : 10;
       }
 
       return {
@@ -2100,13 +2637,9 @@ export class EngineThree {
   // SKYBOX CONTROL METHODS
   // ============================================================================
 
-  /** Rotate skybox by degrees (0-360) */
-  setSkyboxRotation = (degrees: number) => {
-    if (this.skyboxTexture) {
-      // Convert degrees to texture offset (0-360 maps to 0-1)
-      this.skyboxTexture.offset.x = degrees / 360;
-      this.skyboxTexture.needsUpdate = true;
-    }
+  /** Rotate skybox - not supported with scene.background texture approach */
+  setSkyboxRotation = (_degrees: number) => {
+    // Rotation not supported - would require upgrading Three.js or using a skybox mesh
   };
 
   /** Set skybox blur (0-1) */
@@ -2123,9 +2656,146 @@ export class EngineThree {
     }
   };
 
-  /** Check if skybox is ready */
+  /** Check if skybox is ready - checks if scene has background */
   isSkyboxReady = (): boolean => {
-    return this.skyboxTexture !== null && this.scene !== null;
+    return this.scene !== null && this.scene.background !== null;
+  };
+
+  /** Set skybox texture reference (called when texture finishes loading) */
+  setSkyboxTexture = (texture: THREE.Texture) => {
+    this.skyboxTexture = texture;
+  };
+
+  // ============================================================================
+  // POST-PROCESSING CONTROL METHODS
+  // ============================================================================
+
+  /** Set tone mapping type */
+  setToneMapping = (type: THREE.ToneMapping) => {
+    if (this.renderer) {
+      this.renderer.toneMapping = type;
+    }
+  };
+
+  /** Get current tone mapping type */
+  getToneMapping = (): THREE.ToneMapping => {
+    return this.renderer?.toneMapping ?? THREE.NoToneMapping;
+  };
+
+  /** Set tone mapping exposure (0.1-3) */
+  setExposure = (exposure: number) => {
+    if (this.renderer) {
+      this.renderer.toneMappingExposure = Math.max(0.1, Math.min(3, exposure));
+    }
+  };
+
+  /** Get current exposure */
+  getExposure = (): number => {
+    return this.renderer?.toneMappingExposure ?? 1;
+  };
+
+  /** Set environment intensity for materials (0-3) */
+  setEnvironmentIntensity = (intensity: number) => {
+    if (this.scene) {
+      (this.scene as any).environmentIntensity = Math.max(0, Math.min(3, intensity));
+    }
+  };
+
+  /** Get current environment intensity */
+  getEnvironmentIntensity = (): number => {
+    return (this.scene as any)?.environmentIntensity ?? 1;
+  };
+
+  /** Check if renderer is ready for post-processing controls */
+  isRendererReady = (): boolean => {
+    return this.renderer !== null;
+  };
+
+  // ========================================
+  // PERFORMANCE TESTING
+  // ========================================
+
+  /**
+   * Compare performance of transitionAU vs transitionAUOptimized.
+   * Runs many transitions and logs timing.
+   */
+  benchmarkTransitions = (iterations = 100) => {
+    console.log(`[EngineThree] 🏎️ Benchmarking ${iterations} iterations...`);
+
+    // Test AUs: 12 (smile), 31 (head left), 61 (eyes left)
+    const testAUs = [12, 31, 61];
+
+    // Benchmark original transitionAU
+    const startOrig = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      for (const au of testAUs) {
+        this.transitionAU(au, i % 2 === 0 ? 0.8 : 0.2, 10);
+      }
+    }
+    const timeOrig = performance.now() - startOrig;
+
+    // Clear transitions
+    this.clearTransitions();
+    this.resetToNeutral();
+
+    // Benchmark optimized transitionAUOptimized
+    const startOpt = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      for (const au of testAUs) {
+        this.transitionAUOptimized(au, i % 2 === 0 ? 0.8 : 0.2, 10);
+      }
+    }
+    const timeOpt = performance.now() - startOpt;
+
+    // Clear transitions
+    this.clearTransitions();
+    this.resetToNeutral();
+
+    console.log(`[EngineThree] 📊 Benchmark Results:`);
+    console.log(`  Original transitionAU:   ${timeOrig.toFixed(2)}ms`);
+    console.log(`  Optimized transitionAU:  ${timeOpt.toFixed(2)}ms`);
+    console.log(`  Speedup: ${(timeOrig / timeOpt).toFixed(2)}x`);
+
+    return { original: timeOrig, optimized: timeOpt };
+  };
+
+  /**
+   * Test the optimized transition visually - run a smile animation.
+   */
+  testOptimizedSmile = () => {
+    console.log('[EngineThree] 😊 Testing optimized smile transition...');
+
+    // Sequence: smile on, hold, smile off
+    this.transitionAUOptimized(12, 0.9, 400);
+
+    setTimeout(() => {
+      this.transitionAUOptimized(12, 0, 400);
+    }, 1000);
+  };
+
+  /**
+   * Test the optimized transition for head turn.
+   */
+  testOptimizedHeadTurn = () => {
+    console.log('[EngineThree] 🔄 Testing optimized head turn transition...');
+
+    // Turn left
+    this.transitionAUOptimized(31, 0.7, 500);
+
+    setTimeout(() => {
+      // Back to center
+      this.transitionAUOptimized(31, 0, 500);
+
+      setTimeout(() => {
+        // Turn right
+        this.transitionAUOptimized(32, 0.7, 500);
+
+        setTimeout(() => {
+          // Back to center
+          this.transitionAUOptimized(32, 0, 500);
+        }, 1000);
+      }, 600);
+    }, 1000);
   };
 }
 

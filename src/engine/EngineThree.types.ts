@@ -9,6 +9,24 @@
  */
 
 /**
+ * TransitionHandle - returned from transitionAU/transitionMorph/transitionContinuum
+ * Provides promise-based completion notification plus fine-grained control.
+ *
+ * The animation agency uses these handles to await keyframe transitions,
+ * then schedule the next keyframe when the promise resolves.
+ */
+export type TransitionHandle = {
+  /** Resolves when the transition completes (or is cancelled) */
+  promise: Promise<void>;
+  /** Pause this transition (holds at current value) */
+  pause: () => void;
+  /** Resume this transition after pause */
+  resume: () => void;
+  /** Cancel this transition immediately (resolves promise) */
+  cancel: () => void;
+};
+
+/**
  * Engine - The 3D rendering engine interface (EngineThree)
  *
  * The Animation Agency delegates rendering to the Engine, which handles:
@@ -45,23 +63,64 @@ export interface Engine {
 
   /**
    * Transition AU value smoothly over duration
-   * Preferred method - creates smooth interpolation using RAF
+   * Returns a TransitionHandle with promise for completion + pause/resume/cancel
    *
    * @param id - AU number (e.g., 12 for lip corner puller)
    * @param value - Target value in [0, 1]
    * @param durationMs - Transition duration in milliseconds (default: 120ms)
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
    */
-  transitionAU?: (id: number | string, value: number, durationMs?: number) => void;
+  transitionAU?: (id: number | string, value: number, durationMs?: number) => TransitionHandle;
+
+  /**
+   * OPTIMIZED: Transition AU value with pre-resolved targets
+   * Resolves morph indices and bone references once at creation time,
+   * then applies values directly each tick without lookups.
+   *
+   * Use this for performance-critical transitions (e.g., eye/head tracking)
+   *
+   * @param id - AU number (e.g., 12 for lip corner puller)
+   * @param value - Target value in [0, 1]
+   * @param durationMs - Transition duration in milliseconds (default: 200ms)
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
+   */
+  transitionAUOptimized?: (id: number | string, value: number, durationMs?: number) => TransitionHandle;
 
   /**
    * Transition morph value smoothly over duration
-   * Used for visemes and custom morph targets
+   * Used for custom morph targets (NOT visemes - use transitionViseme for those)
    *
-   * @param name - Morph target name (e.g., 'jawOpen', 'aa', 'ee')
+   * @param name - Morph target name (e.g., 'Brow_Raise_Inner_L')
    * @param value - Target value in [0, 1]
    * @param durationMs - Transition duration in milliseconds (default: 80ms)
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
    */
-  transitionMorph?: (name: string, value: number, durationMs?: number) => void;
+  transitionMorph?: (name: string, value: number, durationMs?: number) => TransitionHandle;
+
+  /**
+   * Set viseme value immediately (no transition)
+   * Applies both viseme morph target AND jaw bone rotation
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param value - Target value in [0, 1]
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   */
+  setViseme?: (visemeIndex: number, value: number, jawScale?: number) => void;
+
+  /**
+   * Transition viseme smoothly over duration
+   * Applies both viseme morph target AND jaw bone rotation with smooth interpolation
+   *
+   * Visemes are separate from AUs - they have their own morph targets (EE, Ah, Oh, etc.)
+   * plus coordinated jaw bone movement based on phonetic properties.
+   *
+   * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
+   * @param value - Target value in [0, 1]
+   * @param durationMs - Transition duration in milliseconds (default: 80ms)
+   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
+   */
+  transitionViseme?: (visemeIndex: number, value: number, durationMs?: number, jawScale?: number) => TransitionHandle;
 
   /**
    * Transition a continuum AU pair (e.g., eyes left/right, head up/down).
@@ -72,8 +131,9 @@ export interface Engine {
    * @param posAU - AU ID for positive direction (e.g., 62 for eyes right, 32 for head right)
    * @param value - Target value from -1 (full negative) to +1 (full positive)
    * @param durationMs - Transition duration in milliseconds (default: 200ms)
+   * @returns TransitionHandle with { promise, pause, resume, cancel }
    */
-  transitionContinuum?: (negAU: number, posAU: number, value: number, durationMs?: number) => void;
+  transitionContinuum?: (negAU: number, posAU: number, value: number, durationMs?: number) => TransitionHandle;
 
   /**
    * Callback invoked when a non-looping snippet naturally completes

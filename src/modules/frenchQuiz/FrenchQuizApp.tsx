@@ -86,7 +86,6 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
         onsetIntensity: 90,
         holdMs: 100,
         speechRate: 0.9,
-        jawActivation: 1.5,
         lipsyncIntensity: 1.0,
       },
       {}

@@ -12,7 +12,6 @@ import './styles.css';
 import { setupGLBCacheDebug } from './utils/glbCacheDebug';
 
 import { AU_TO_MORPHS } from './engine/arkit/shapeDict';
-import { EngineFour } from './engine/EngineFour';
 
 function AppContent() {
   const { engine, anim } = useEngineState();
@@ -62,8 +61,16 @@ function AppContent() {
   }
 
   const handleReady = useCallback(
-    ({ meshes, model, animations, hairService }: { meshes: any[]; model?: any; animations?: any[]; hairService?: HairService }) => {
-      engine.onReady({ meshes, model, animations });
+    ({ meshes, model, animations, hairService, scene, renderer, skyboxTexture }: {
+      meshes: any[];
+      model?: any;
+      animations?: any[];
+      hairService?: HairService;
+      scene?: THREE.Scene;
+      renderer?: THREE.WebGLRenderer;
+      skyboxTexture?: THREE.Texture;
+    }) => {
+      engine.onReady({ meshes, model, animations, scene, renderer, skyboxTexture });
 
       // Set hair service if available
       if (hairService) {
@@ -154,7 +161,6 @@ function AppContent() {
   // Use BASE_URL for all assets to work with GitHub Pages base path
   const glbSrc = import.meta.env.BASE_URL + "characters/jonathan_new.glb";
   const skyboxUrl = import.meta.env.BASE_URL + "skyboxes/3BR2D07.jpg";
-  const isEngineFour = engine instanceof EngineFour;
 
   return (
     <div className="fullscreen-scene">

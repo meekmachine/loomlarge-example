@@ -7,16 +7,18 @@ import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { HairService } from '../latticework/hair/hairService';
-import { classifyHairObject } from '../engine/arkit/shapeDict';
+import { CC4_MESHES } from '../engine/arkit/shapeDict';
 import { useThreeState } from '../context/threeContext';
 import { getGLBCacheManager } from '../utils/GLBCacheManager';
 
 export type CharacterReady = {
   scene: THREE.Scene;
+  renderer: THREE.WebGLRenderer;
   model: THREE.Object3D;
-  meshes: THREE.Mesh[]; // meshes with morph targets (for facslib)
+  meshes: THREE.Mesh[]; // meshes with morph targets
   animations?: THREE.AnimationClip[];
   hairService?: HairService; // hair customization service
+  skyboxTexture?: THREE.Texture; // skybox texture for engine control
 };
 
 type CameraOverride = {
@@ -64,9 +66,17 @@ export default function CharacterGLBScene({
     scene.background = new THREE.Color(0x0b0b0c);
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 1.6, 3);
+    // Set initial camera position to match override if provided (prevents camera jump on model load)
+    if (cameraOverride) {
+      const [px, py, pz] = cameraOverride.position;
+      camera.position.set(px, py, pz);
+    } else {
+      camera.position.set(0, 1.6, 3);
+    }
 
-    // Load skybox if provided
+    // Load skybox texture
+    let skyboxTexture: THREE.Texture | null = null;
+
     if (skyboxUrl) {
       const isHDR = skyboxUrl.toLowerCase().endsWith('.hdr') || skyboxUrl.toLowerCase().endsWith('.exr');
 
@@ -80,9 +90,10 @@ export default function CharacterGLBScene({
           skyboxUrl,
           (texture) => {
             const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-            scene.background = envMap;
             scene.environment = envMap;
-            texture.dispose();
+            scene.background = texture;
+            skyboxTexture = texture;
+            engine?.setSkyboxTexture(texture);
             pmremGenerator.dispose();
           }
         );
@@ -92,14 +103,17 @@ export default function CharacterGLBScene({
         textureLoader.load(
           skyboxUrl,
           (texture) => {
-            texture.mapping = THREE.EquirectangularReflectionMapping;
             texture.colorSpace = THREE.SRGBColorSpace;
-            scene.background = texture;
+            texture.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = texture;
+            scene.background = texture;
+            skyboxTexture = texture;
+            engine?.setSkyboxTexture(texture);
           }
         );
       }
     }
+
 
     // Lights - softer, more ambient lighting
     const hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 0.4);
@@ -116,6 +130,12 @@ export default function CharacterGLBScene({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.rotateSpeed = 0.5;
+    // Set initial target to match override if provided (prevents camera jump on model load)
+    if (cameraOverride) {
+      const [tx, ty, tz] = cameraOverride.target;
+      controls.target.set(tx, ty, tz);
+      controls.update();
+    }
 
     // Load GLB with Draco support
     const loader = new GLTFLoader();
@@ -295,16 +315,16 @@ export default function CharacterGLBScene({
         console.groupEnd();
 
         // Automatically detect hair and eyebrow objects in the loaded model
-        // Uses centralized classification from shapeDict.ts
+        // Uses CC4_MESHES from shapeDict.ts as single source of truth
         const hairObjects: THREE.Object3D[] = [];
 
         console.group('[CharacterGLBScene] 🦱 HAIR OBJECT DETECTION');
         model.traverse((obj) => {
-          // Use centralized classification helper
-          const classification = classifyHairObject(obj.name);
+          const meshInfo = CC4_MESHES[obj.name];
+          const category = meshInfo?.category;
 
-          if (classification) {
-            console.log(`Found ${classification}: ${obj.name} (type: ${obj.type}, isMesh: ${(obj as THREE.Mesh).isMesh || false})`);
+          if (category === 'hair' || category === 'eyebrow') {
+            console.log(`Found ${category}: ${obj.name} (type: ${obj.type}, isMesh: ${(obj as THREE.Mesh).isMesh || false})`);
             hairObjects.push(obj);
           }
         });
@@ -395,7 +415,7 @@ export default function CharacterGLBScene({
           loadingTextMesh = null;
         }
 
-        onReady?.({ scene, model, meshes, animations: gltf.animations, hairService: hairService || undefined });
+        onReady?.({ scene, renderer, model, meshes, animations: gltf.animations, hairService: hairService || undefined, skyboxTexture: skyboxTexture || undefined });
           },
           (progressEvent) => {
             // Calculate loading progress percentage
@@ -428,8 +448,9 @@ export default function CharacterGLBScene({
             // Hair detection (same as above)
             const hairObjects: THREE.Object3D[] = [];
             model.traverse((obj) => {
-              const classification = classifyHairObject(obj.name);
-              if (classification) {
+              const meshInfo = CC4_MESHES[obj.name];
+              const category = meshInfo?.category;
+              if (category === 'hair' || category === 'eyebrow') {
                 hairObjects.push(obj);
               }
             });
@@ -491,7 +512,7 @@ export default function CharacterGLBScene({
               loadingTextMesh = null;
             }
 
-            onReady?.({ scene, model, meshes, animations: gltf.animations, hairService: hairService || undefined });
+            onReady?.({ scene, renderer, model, meshes, animations: gltf.animations, hairService: hairService || undefined, skyboxTexture: skyboxTexture || undefined });
           },
           (progressEvent) => {
             if (progressEvent.lengthComputable) {

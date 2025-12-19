@@ -1,16 +1,19 @@
 /**
  * LipSync Scheduler
- * Handles viseme timeline processing, curve building, jaw coordination, and animation scheduling
+ * Handles viseme timeline processing, curve building, and animation scheduling
  * Follows the Animation Agency pattern
+ *
+ * Uses a simple, sequential viseme pattern matching the working snippet files:
+ * - Each viseme has a simple 4-keyframe envelope (ramp up → hold → hold → ramp down)
+ * - No overlapping/coarticulation - cleaner, more predictable results
+ * - Viseme morphs include mouth opening - no separate jaw AU needed
  */
 
 import type { LipSyncSnippet } from './lipSyncMachine';
 import type { VisemeEvent } from './types';
 import { phonemeExtractor } from './PhonemeExtractor';
 import { visemeMapper } from './VisemeMapper';
-import { getARKitVisemeIndex, getJawAmountForViseme } from './visemeToARKit';
-import { emotionalModulator } from './emotionalModulation';
-import { coarticulationModel } from './coarticulationModel';
+import { getARKitVisemeIndex } from './visemeToARKit';
 
 export interface LipSyncHostCaps {
   scheduleSnippet: (snippet: any) => string | null;
@@ -18,11 +21,9 @@ export interface LipSyncHostCaps {
 }
 
 export interface LipSyncSchedulerConfig {
-  jawActivation: number;
   lipsyncIntensity: number;
   speechRate: number;
-  useEmotionalModulation: boolean;
-  useCoarticulation: boolean;
+  jawScale: number;
 }
 
 export class LipSyncScheduler {
@@ -33,11 +34,15 @@ export class LipSyncScheduler {
   constructor(
     machine: any,
     host: LipSyncHostCaps,
-    config: LipSyncSchedulerConfig
+    config: Partial<LipSyncSchedulerConfig> & Pick<LipSyncSchedulerConfig, 'lipsyncIntensity' | 'speechRate'>
   ) {
     this.machine = machine;
     this.host = host;
-    this.config = config;
+    this.config = {
+      lipsyncIntensity: config.lipsyncIntensity,
+      speechRate: config.speechRate,
+      jawScale: config.jawScale ?? 1.0,
+    };
   }
 
   /**
@@ -60,10 +65,11 @@ export class LipSyncScheduler {
       curves,
       maxTime,
       loop: false,
-      snippetCategory: 'combined', // Combined visemes + AU (jaw)
+      snippetCategory: 'visemeSnippet', // Viseme morphs only - no AUs
       snippetPriority: 50, // High priority (overrides emotions)
       snippetPlaybackRate: this.config.speechRate,
       snippetIntensityScale: 1.0,
+      snippetJawScale: this.config.jawScale, // Jaw bone activation multiplier
     };
 
     // Schedule to animation service
@@ -98,15 +104,8 @@ export class LipSyncScheduler {
 
     for (const phoneme of phonemes) {
       const mapping = visemeMapper.getVisemeAndDuration(phoneme);
-      let durationMs = mapping.duration;
-
-      // Apply emotional modulation if enabled
-      if (this.config.useEmotionalModulation) {
-        durationMs = emotionalModulator.modulateDuration(durationMs);
-      }
-
       // Adjust for speech rate
-      durationMs = visemeMapper.adjustDuration(durationMs, this.config.speechRate);
+      const durationMs = visemeMapper.adjustDuration(mapping.duration, this.config.speechRate);
 
       visemeEvents.push({
         visemeId: mapping.viseme,
@@ -121,119 +120,49 @@ export class LipSyncScheduler {
   }
 
   /**
-   * Build animation curves with easing, coarticulation, and jaw coordination
+   * Build animation curves with simple sequential viseme pattern
+   * Matches the working snippet file format (no coarticulation)
    */
   private buildCurves(
     visemeTimeline: VisemeEvent[]
   ): Record<string, Array<{ time: number; intensity: number }>> {
-    const combinedCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
+    const curves: Record<string, Array<{ time: number; intensity: number }>> = {};
 
-    // Apply coarticulation if enabled
-    if (this.config.useCoarticulation && visemeTimeline.length > 1) {
-      const coarticulatedCurves = coarticulationModel.applyCoarticulation(
-        visemeTimeline,
-        this.config.lipsyncIntensity * 90
-      );
+    // Intensity scaled by config (100 = full intensity like in snippet files)
+    const peakIntensity = 100 * this.config.lipsyncIntensity;
 
-      // Convert viseme IDs to ARKit indices and add to combined curves
-      Object.entries(coarticulatedCurves).forEach(([visemeId, keyframes]) => {
-        const arkitIndex = getARKitVisemeIndex(parseInt(visemeId));
-        combinedCurves[arkitIndex.toString()] = keyframes;
-      });
-    } else {
-      // Build curves manually without coarticulation
-      visemeTimeline.forEach((visemeEvent, idx) => {
-        const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
-        const visemeId = arkitIndex.toString();
-        const timeInSec = visemeEvent.offsetMs / 1000;
-        const durationInSec = visemeEvent.durationMs / 1000;
-
-        // Natural easing with anticipation
-        const anticipation = durationInSec * 0.1;
-        const attack = durationInSec * 0.25;
-        const sustain = durationInSec * 0.45;
-
-        // Initialize curve array
-        if (!combinedCurves[visemeId]) {
-          combinedCurves[visemeId] = [];
-        }
-
-        // Check if previous viseme was same
-        const lastKeyframe = combinedCurves[visemeId][combinedCurves[visemeId].length - 1];
-        const startIntensity =
-          lastKeyframe && lastKeyframe.time > timeInSec - 0.02 ? lastKeyframe.intensity : 0;
-
-        // Apply emotional modulation if enabled
-        let baseIntensity = 95 * this.config.lipsyncIntensity;
-        if (this.config.useEmotionalModulation) {
-          baseIntensity = emotionalModulator.modulateIntensity(baseIntensity);
-        }
-
-        // Viseme animation with smooth, natural motion
-        combinedCurves[visemeId].push(
-          { time: timeInSec, intensity: startIntensity },
-          { time: timeInSec + anticipation, intensity: 30 * this.config.lipsyncIntensity },
-          { time: timeInSec + attack, intensity: baseIntensity },
-          { time: timeInSec + sustain, intensity: baseIntensity * 0.95 },
-          { time: timeInSec + durationInSec, intensity: 0 }
-        );
-      });
-    }
-
-    // Add jaw coordination (AU 26)
-    this.addJawCurves(combinedCurves, visemeTimeline);
-
-    return combinedCurves;
-  }
-
-  /**
-   * Add jaw (AU 26) curves coordinated with visemes
-   */
-  private addJawCurves(
-    curves: Record<string, Array<{ time: number; intensity: number }>>,
-    visemeTimeline: VisemeEvent[]
-  ): void {
-    const jawCurve: Array<{ time: number; intensity: number }> = [];
-
+    // Build simple sequential viseme curves
+    // Pattern from working snippets: ramp up (20ms) → hold → hold → ramp down (20ms)
     visemeTimeline.forEach((visemeEvent) => {
-      const timeInSec = visemeEvent.offsetMs / 1000;
-      const durationInSec = visemeEvent.durationMs / 1000;
+      const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
+      const curveKey = arkitIndex.toString();
+      const startTime = visemeEvent.offsetMs / 1000;
+      const duration = visemeEvent.durationMs / 1000;
 
-      // Get jaw amount for this viseme
-      let jawAmount = getJawAmountForViseme(visemeEvent.visemeId);
+      // Skip silence visemes (SAPI 0 maps to ARKit 3, but we don't animate pauses)
+      if (visemeEvent.visemeId === 0) return;
 
-      // Apply emotional modulation if enabled
-      if (this.config.useEmotionalModulation) {
-        jawAmount = emotionalModulator.modulateJaw(jawAmount * 100) / 100;
+      // Simple 4-keyframe envelope matching working snippets
+      const rampTime = 0.02; // 20ms ramp (fixed, like in snippets)
+      const holdStart = startTime + rampTime;
+      const holdEnd = startTime + duration - rampTime;
+      const endTime = startTime + duration;
+
+      // Initialize curve if needed
+      if (!curves[curveKey]) {
+        curves[curveKey] = [];
       }
 
-      if (jawAmount > 0.05) {
-        // Only animate jaw if significant movement
-        const jawAnticipation = durationInSec * 0.15;
-        const jawAttack = durationInSec * 0.3;
-        const jawSustain = durationInSec * 0.4;
-
-        const lastJawKeyframe = jawCurve[jawCurve.length - 1];
-        const startJawIntensity =
-          lastJawKeyframe && lastJawKeyframe.time > timeInSec - 0.02
-            ? lastJawKeyframe.intensity
-            : 0;
-
-        const jawIntensity = jawAmount * 100 * this.config.jawActivation;
-
-        jawCurve.push(
-          { time: timeInSec, intensity: startJawIntensity },
-          { time: timeInSec + jawAnticipation, intensity: jawIntensity * 0.2 },
-          { time: timeInSec + jawAttack, intensity: jawIntensity * 0.9 },
-          { time: timeInSec + jawSustain, intensity: jawIntensity },
-          { time: timeInSec + durationInSec, intensity: 0 }
-        );
-      }
+      // Add the 4-keyframe envelope
+      curves[curveKey].push(
+        { time: startTime, intensity: 0 },        // Start at 0
+        { time: holdStart, intensity: peakIntensity },  // Ramp up to peak
+        { time: holdEnd, intensity: peakIntensity },    // Hold at peak
+        { time: endTime, intensity: 0 }           // Ramp down to 0
+      );
     });
 
-    if (jawCurve.length > 0) {
-      curves['26'] = jawCurve;
-    }
+    return curves;
   }
 
   /**
@@ -251,17 +180,19 @@ export class LipSyncScheduler {
 
   /**
    * Schedule neutral return snippet
+   * Smoothly transitions all active visemes back to closed/neutral
    */
   public scheduleNeutralReturn(): void {
     const neutralSnippet = {
       name: `neutral_${Date.now()}`,
       curves: this.buildNeutralCurves(),
-      maxTime: 0.3,
+      maxTime: 0.15, // Faster return to neutral
       loop: false,
-      snippetCategory: 'combined',
-      snippetPriority: 60,
+      snippetCategory: 'visemeSnippet', // Viseme morphs only
+      snippetPriority: 60, // Higher priority than lipsync (50) to ensure closure
       snippetPlaybackRate: 1.0,
       snippetIntensityScale: 1.0,
+      snippetJawScale: this.config.jawScale, // Jaw bone activation multiplier
     };
 
     const scheduledName = this.host.scheduleSnippet(neutralSnippet);
@@ -270,29 +201,26 @@ export class LipSyncScheduler {
       // Auto-remove after completion
       setTimeout(() => {
         this.host.removeSnippet(scheduledName);
-      }, 350);
+      }, 200);
     }
   }
 
   /**
-   * Build neutral curves (all visemes and jaw to 0)
+   * Build neutral curves (all visemes to 0)
+   * Uses 'inherit' flag so the animation system starts from current values
    */
-  private buildNeutralCurves(): Record<string, Array<{ time: number; intensity: number }>> {
-    const neutralCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
+  private buildNeutralCurves(): Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> {
+    const neutralCurves: Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> = {};
+    const closeDuration = 0.15; // 150ms to close mouth
 
     // Add neutral curves for all 15 ARKit viseme indices (0-14)
+    // Start from current value (inherit) and transition to 0
     for (let i = 0; i < 15; i++) {
       neutralCurves[i.toString()] = [
-        { time: 0.0, intensity: 0 },
-        { time: 0.3, intensity: 0 },
+        { time: 0.0, intensity: 0, inherit: true }, // Start from current value
+        { time: closeDuration, intensity: 0 },      // End at 0
       ];
     }
-
-    // Add jaw closure (AU 26)
-    neutralCurves['26'] = [
-      { time: 0.0, intensity: 0 },
-      { time: 0.3, intensity: 0 },
-    ];
 
     return neutralCurves;
   }
