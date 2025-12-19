@@ -13,6 +13,7 @@ import { getGLBCacheManager } from '../utils/GLBCacheManager';
 
 export type CharacterReady = {
   scene: THREE.Scene;
+  renderer: THREE.WebGLRenderer;
   model: THREE.Object3D;
   meshes: THREE.Mesh[]; // meshes with morph targets
   animations?: THREE.AnimationClip[];
@@ -89,16 +90,10 @@ export default function CharacterGLBScene({
           skyboxUrl,
           (texture) => {
             const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-            // Use envMap for lighting/reflections
             scene.environment = envMap;
-            // Also use as background (simplest approach that works)
             scene.background = texture;
-            // Enable texture wrapping for rotation offset to work
-            texture.wrapS = THREE.RepeatWrapping;
             skyboxTexture = texture;
-            // Notify engine that skybox texture is ready
             engine?.setSkyboxTexture(texture);
-
             pmremGenerator.dispose();
           }
         );
@@ -109,15 +104,10 @@ export default function CharacterGLBScene({
           skyboxUrl,
           (texture) => {
             texture.colorSpace = THREE.SRGBColorSpace;
-            // Use for environment lighting
             texture.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = texture;
-            // Also use as background (simplest approach that works)
             scene.background = texture;
-            // Enable texture wrapping for rotation offset to work
-            texture.wrapS = THREE.RepeatWrapping;
             skyboxTexture = texture;
-            // Notify engine that skybox texture is ready
             engine?.setSkyboxTexture(texture);
           }
         );
@@ -425,7 +415,7 @@ export default function CharacterGLBScene({
           loadingTextMesh = null;
         }
 
-        onReady?.({ scene, model, meshes, animations: gltf.animations, hairService: hairService || undefined, skyboxTexture: skyboxTexture || undefined });
+        onReady?.({ scene, renderer, model, meshes, animations: gltf.animations, hairService: hairService || undefined, skyboxTexture: skyboxTexture || undefined });
           },
           (progressEvent) => {
             // Calculate loading progress percentage
@@ -522,7 +512,7 @@ export default function CharacterGLBScene({
               loadingTextMesh = null;
             }
 
-            onReady?.({ scene, model, meshes, animations: gltf.animations, hairService: hairService || undefined, skyboxTexture: skyboxTexture || undefined });
+            onReady?.({ scene, renderer, model, meshes, animations: gltf.animations, hairService: hairService || undefined, skyboxTexture: skyboxTexture || undefined });
           },
           (progressEvent) => {
             if (progressEvent.lengthComputable) {

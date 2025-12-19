@@ -61,8 +61,16 @@ function AppContent() {
   }
 
   const handleReady = useCallback(
-    ({ meshes, model, animations, hairService }: { meshes: any[]; model?: any; animations?: any[]; hairService?: HairService }) => {
-      engine.onReady({ meshes, model, animations });
+    ({ meshes, model, animations, hairService, scene, renderer, skyboxTexture }: {
+      meshes: any[];
+      model?: any;
+      animations?: any[];
+      hairService?: HairService;
+      scene?: THREE.Scene;
+      renderer?: THREE.WebGLRenderer;
+      skyboxTexture?: THREE.Texture;
+    }) => {
+      engine.onReady({ meshes, model, animations, scene, renderer, skyboxTexture });
 
       // Set hair service if available
       if (hairService) {

@@ -177,6 +177,7 @@ export class EngineThree {
 
   // Skybox storage
   private scene: THREE.Scene | null = null;
+  private renderer: THREE.WebGLRenderer | null = null;
   private skyboxTexture: THREE.Texture | null = null;
 
   // Unified rotation state tracking for bones
@@ -979,11 +980,12 @@ export class EngineThree {
 
   hasBoneBinding = (id: number) => BONE_DRIVEN_AUS.has(id);
 
-  onReady = ({ meshes, model, animations, scene, skyboxTexture }: {
+  onReady = ({ meshes, model, animations, scene, renderer, skyboxTexture }: {
     meshes: THREE.Mesh[];
     model?: THREE.Object3D;
     animations?: THREE.AnimationClip[];
     scene?: THREE.Scene;
+    renderer?: THREE.WebGLRenderer;
     skyboxTexture?: THREE.Texture;
   }) => {
     this.meshes = meshes;
@@ -991,8 +993,9 @@ export class EngineThree {
     // Build morph index cache for optimized transitions
     this.buildMorphIndexCache();
 
-    // Store scene and skybox references
+    // Store scene, renderer, and skybox references
     if (scene) this.scene = scene;
+    if (renderer) this.renderer = renderer;
     if (skyboxTexture) this.skyboxTexture = skyboxTexture;
 
     if (model) {
@@ -2634,13 +2637,9 @@ export class EngineThree {
   // SKYBOX CONTROL METHODS
   // ============================================================================
 
-  /** Rotate skybox by degrees (0-360) */
-  setSkyboxRotation = (degrees: number) => {
-    if (this.skyboxTexture) {
-      // Convert degrees to texture offset (0-360 maps to 0-1)
-      this.skyboxTexture.offset.x = degrees / 360;
-      this.skyboxTexture.needsUpdate = true;
-    }
+  /** Rotate skybox - not supported with scene.background texture approach */
+  setSkyboxRotation = (_degrees: number) => {
+    // Rotation not supported - would require upgrading Three.js or using a skybox mesh
   };
 
   /** Set skybox blur (0-1) */
@@ -2657,7 +2656,7 @@ export class EngineThree {
     }
   };
 
-  /** Check if skybox is ready - checks if scene has a background set */
+  /** Check if skybox is ready - checks if scene has background */
   isSkyboxReady = (): boolean => {
     return this.scene !== null && this.scene.background !== null;
   };
@@ -2665,6 +2664,51 @@ export class EngineThree {
   /** Set skybox texture reference (called when texture finishes loading) */
   setSkyboxTexture = (texture: THREE.Texture) => {
     this.skyboxTexture = texture;
+  };
+
+  // ============================================================================
+  // POST-PROCESSING CONTROL METHODS
+  // ============================================================================
+
+  /** Set tone mapping type */
+  setToneMapping = (type: THREE.ToneMapping) => {
+    if (this.renderer) {
+      this.renderer.toneMapping = type;
+    }
+  };
+
+  /** Get current tone mapping type */
+  getToneMapping = (): THREE.ToneMapping => {
+    return this.renderer?.toneMapping ?? THREE.NoToneMapping;
+  };
+
+  /** Set tone mapping exposure (0.1-3) */
+  setExposure = (exposure: number) => {
+    if (this.renderer) {
+      this.renderer.toneMappingExposure = Math.max(0.1, Math.min(3, exposure));
+    }
+  };
+
+  /** Get current exposure */
+  getExposure = (): number => {
+    return this.renderer?.toneMappingExposure ?? 1;
+  };
+
+  /** Set environment intensity for materials (0-3) */
+  setEnvironmentIntensity = (intensity: number) => {
+    if (this.scene) {
+      (this.scene as any).environmentIntensity = Math.max(0, Math.min(3, intensity));
+    }
+  };
+
+  /** Get current environment intensity */
+  getEnvironmentIntensity = (): number => {
+    return (this.scene as any)?.environmentIntensity ?? 1;
+  };
+
+  /** Check if renderer is ready for post-processing controls */
+  isRendererReady = (): boolean => {
+    return this.renderer !== null;
   };
 
   // ========================================
