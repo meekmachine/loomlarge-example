@@ -216,19 +216,15 @@ export class EyeHeadTrackingService {
     // Clear any existing return-to-neutral timer since we have a new target
     this.clearReturnToNeutralTimer();
 
-    const headDelay = this.config.headFollowEyes ? (this.config.headFollowDelay ?? 0) : 0;
-    const applyHeadImmediately = !this.config.headTrackingEnabled
-      ? false
-      : !this.config.headFollowEyes || headDelay <= 0;
-
-    // Apply eyes immediately; apply head immediately only when needed (otherwise schedule lag).
+    // Apply both eyes and head together - headFollowDelay adds to head transition duration
+    // so the head moves slower and "lags" behind the eyes naturally
     this.applyGazeToCharacter(target, {
       applyEyes: this.config.eyeTrackingEnabled,
-      applyHead: applyHeadImmediately,
+      applyHead: this.config.headTrackingEnabled,
     });
 
     if (this.config.headTrackingEnabled) {
-      this.state.headStatus = this.config.headFollowEyes && headDelay > 0 ? 'lagging' : 'tracking';
+      this.state.headStatus = 'tracking';
     }
     this.machine?.send({
       type: 'SET_STATUS',
@@ -236,17 +232,6 @@ export class EyeHeadTrackingService {
       head: this.state.headStatus,
       lastApplied: this.state.currentGaze,
     });
-
-    if (this.config.headTrackingEnabled && this.config.headFollowEyes && headDelay > 0) {
-      if (this.state.headFollowTimer) {
-        clearTimeout(this.state.headFollowTimer);
-      }
-      this.state.headFollowTimer = window.setTimeout(() => {
-        this.applyGazeToCharacter(target, { applyEyes: false, applyHead: true });
-        this.state.headStatus = 'tracking';
-        this.state.headFollowTimer = null;
-      }, headDelay);
-    }
 
     // Schedule return to neutral if enabled (only for manual mode)
     this.scheduleReturnToNeutral();
@@ -705,7 +690,11 @@ export class EyeHeadTrackingService {
     // Linear interpolation based on distance (0 to sqrt(2) for full diagonal)
     const normalizedDistance = Math.min(distance / Math.sqrt(2), 1.0);
     const eyeDuration = Math.round(minEyeDuration + normalizedDistance * (maxEyeDuration - minEyeDuration));
-    const headDuration = Math.round(minHeadDuration + normalizedDistance * (maxHeadDuration - minHeadDuration));
+
+    // Add headFollowDelay to head duration - head moves slower so it "lags" behind eyes
+    const headFollowDelay = this.config.headFollowEyes ? (this.config.headFollowDelay ?? 0) : 0;
+    const baseHeadDuration = Math.round(minHeadDuration + normalizedDistance * (maxHeadDuration - minHeadDuration));
+    const headDuration = baseHeadDuration + headFollowDelay;
 
     const applyEyes = options?.applyEyes ?? true;
     const applyHead = options?.applyHead ?? true;
@@ -732,6 +721,7 @@ export class EyeHeadTrackingService {
         const eyeYaw = smoothedTarget.x * eyeIntensity;
         const eyePitch = smoothedTarget.y * eyeIntensity;
         // Eyes horizontal: AU61 (left) / AU62 (right)
+        // Only call ONE AU based on continuum sign (calling both would overwrite the bone)
         if (eyeYaw < 0) {
           this.config.engine.transitionAU?.(61, Math.abs(eyeYaw), eyeDuration);
         } else {

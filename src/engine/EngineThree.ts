@@ -16,11 +16,9 @@ import type {
   ResolvedBones,
   BoneKey,
   NodeBase,
-  Engine,
   RotationsState,
 } from './EngineThree.types';
 import { ThreeAnimation } from './ThreeAnimation';
-import { createAnimationService, type AnimationService } from '../latticework/animation/animationService';
 
 // ============================================================================
 // DERIVED CONSTANTS - computed from shapeDict core data
@@ -52,8 +50,6 @@ export class EngineThree {
 
   // Unified transition system - delegated to ThreeAnimation
   private animation = new ThreeAnimation();
-  /** High-level animation service (snippets, scheduler) */
-  public anim: AnimationService;
 
   private rigReady = false;
   private missingBoneWarnings = new Set<string>();
@@ -87,10 +83,6 @@ export class EngineThree {
   // Fast lookup table for meshes by name (avoids scanning this.meshes every time)
   private meshByName = new Map<string, THREE.Mesh>();
 
-   constructor() {
-    // Create animation service with this engine as host
-    this.anim = createAnimationService(this as unknown as Engine);
-  }
 
   /**
    * Compute per-side AU values given a base intensity and optional L/R balance.
