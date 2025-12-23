@@ -73,7 +73,7 @@ export class EyeHeadTrackingScheduler {
       ...transitionConfig,
     };
 
-    console.log('[Scheduler V2] ✓ Eye/head tracking scheduler initialized (animation agency mode)');
+    // Scheduler initialized
   }
 
   /**
@@ -139,11 +139,6 @@ export class EyeHeadTrackingScheduler {
     duration: number,
     priority: number
   ): void {
-    console.log(
-      `[EyeHeadTrackingScheduler] Eye continuum target yaw=${x.toFixed(2)} pitch=${y.toFixed(
-        2
-      )} intensity=${intensity.toFixed(2)} duration=${(duration * 1000).toFixed(0)}ms`
-    );
     // Yaw (horizontal): -1 (left/AU 61) to +1 (right/AU 62)
     const yaw = x * intensity * 100; // Convert to 0-100 range
     this.host.removeSnippet('eyeHeadTracking/eyeYaw');
@@ -200,11 +195,6 @@ export class EyeHeadTrackingScheduler {
     duration: number,
     priority: number
   ): void {
-    console.log(
-      `[EyeHeadTrackingScheduler] Head continuum target yaw=${x.toFixed(2)} pitch=${y.toFixed(
-        2
-      )} roll=${roll.toFixed(2)} intensity=${intensity.toFixed(2)} duration=${(duration * 1000).toFixed(0)}ms`
-    );
     // Yaw (horizontal): -1 (left/AU 31) to +1 (right/AU 32)
     const yaw = x * intensity * 100;
     this.host.removeSnippet('eyeHeadTracking/headYaw');
@@ -326,7 +316,7 @@ export class EyeHeadTrackingScheduler {
     this.host.removeSnippet('eyeHeadTracking/headPitch');
     this.host.removeSnippet('eyeHeadTracking/headRoll');
 
-    console.log('[Scheduler V2] Stopped - removed all gaze tracking snippets');
+    // Stopped - removed all gaze tracking snippets
   }
 
   /**

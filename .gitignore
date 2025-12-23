@@ -4,3 +4,7 @@ dist
 
 # Large uncompressed GLB (over 100MB - excluded from deployment)
 public/characters/jonathan.glb
+
+## Panda
+styled-system
+styled-system-studio

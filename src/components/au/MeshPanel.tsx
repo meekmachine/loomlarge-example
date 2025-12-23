@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, memo } from 'react';
 import {
   VStack,
   HStack,
@@ -36,7 +36,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   other: 'gray',
 };
 
-export default function MeshPanel({ engine, defaultExpanded = false }: MeshPanelProps) {
+function MeshPanel({ engine, defaultExpanded = false }: MeshPanelProps) {
   const [meshes, setMeshes] = useState<MeshInfo[]>([]);
   const [categoryVisibility, setCategoryVisibility] = useState<Record<string, boolean>>({});
 
@@ -94,37 +94,47 @@ export default function MeshPanel({ engine, defaultExpanded = false }: MeshPanel
 
   return (
     <DockableAccordionItem title="Meshes" isDefaultExpanded={defaultExpanded}>
-      <VStack align="stretch" spacing={3} p={2}>
+      <VStack align="stretch" gap={3} p={2}>
         <Text fontSize="xs" color="gray.400">{meshes.length} meshes loaded</Text>
 
         {categories.map(cat => (
           <Box key={cat} borderWidth="1px" borderColor="gray.600" borderRadius="md" p={2}>
             <HStack justify="space-between" mb={2}>
               <HStack>
-                <Badge colorScheme={CATEGORY_COLORS[cat] || 'gray'}>{cat}</Badge>
+                <Badge colorPalette={CATEGORY_COLORS[cat] || 'gray'}>{cat}</Badge>
                 <Text fontSize="xs" color="gray.400">({byCategory[cat].length})</Text>
               </HStack>
-              <Switch
+              <Switch.Root
                 size="sm"
-                isChecked={categoryVisibility[cat] ?? true}
-                onChange={(e) => toggleCategory(cat, e.target.checked)}
-              />
+                checked={categoryVisibility[cat] ?? true}
+                onCheckedChange={(details) => toggleCategory(cat, details.checked)}
+              >
+                <Switch.HiddenInput />
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Root>
             </HStack>
 
-            <VStack align="stretch" spacing={1} pl={2}>
+            <VStack align="stretch" gap={1} pl={2}>
               {byCategory[cat].map(m => (
                 <HStack key={m.name} justify="space-between" fontSize="xs">
-                  <HStack spacing={2}>
+                  <HStack gap={2}>
                     <Text color={m.visible ? 'white' : 'gray.500'}>{m.name}</Text>
                     {m.morphCount > 0 && (
                       <Text color="gray.500">({m.morphCount} morphs)</Text>
                     )}
                   </HStack>
-                  <Switch
+                  <Switch.Root
                     size="sm"
-                    isChecked={m.visible}
-                    onChange={(e) => toggleMesh(m.name, e.target.checked)}
-                  />
+                    checked={m.visible}
+                    onCheckedChange={(details) => toggleMesh(m.name, details.checked)}
+                  >
+                    <Switch.HiddenInput />
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                  </Switch.Root>
                 </HStack>
               ))}
             </VStack>
@@ -134,3 +144,5 @@ export default function MeshPanel({ engine, defaultExpanded = false }: MeshPanel
     </DockableAccordionItem>
   );
 }
+
+export default memo(MeshPanel);

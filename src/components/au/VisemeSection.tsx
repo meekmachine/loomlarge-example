@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { VStack, Box, Text, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, HStack, Button, useToast } from '@chakra-ui/react';
-import { AddIcon } from '@chakra-ui/icons';
+import { useState, useCallback, memo } from 'react';
+import { VStack, Box, Text, Slider, Tooltip, HStack, Button } from '@chakra-ui/react';
+import { Plus } from 'lucide-react';
+import { toaster } from '../ui/toaster';
 import DockableAccordionItem from './DockableAccordionItem';
 import { CurveEditor } from '../CurveEditor';
 import { EngineThree } from '../../engine/EngineThree';
@@ -16,10 +17,134 @@ type SnippetCurveData = {
   snippet: NormalizedSnippet;
 };
 
+const getSliderColor = (value: number): string => {
+  const teal = { r: 0, g: 128, b: 128 };
+  const magenta = { r: 255, g: 0, b: 255 };
+  const r = Math.round(teal.r + (magenta.r - teal.r) * value);
+  const g = Math.round(teal.g + (magenta.g - teal.g) * value);
+  const b = Math.round(teal.b + (magenta.b - teal.b) * value);
+  return `rgb(${r}, ${g}, ${b})`;
+};
+
+/**
+ * UNCONTROLLED viseme slider - manages its own state
+ *
+ * IMPORTANT: Uses engine.setViseme() which applies BOTH the morph target AND
+ * jaw bone rotation in a coordinated way. Do NOT use setAU(26) for jaw here -
+ * that would conflict with the viseme system's internal jaw coordination and
+ * cause double jaw movement.
+ */
+interface VisemeSliderProps {
+  visemeKey: string;
+  disabled: boolean;
+  engine?: EngineThree | null;
+}
+
+const VisemeSlider = memo(function VisemeSlider({
+  visemeKey,
+  disabled,
+  engine
+}: VisemeSliderProps) {
+  // Internal state - component is uncontrolled
+  const [value, setValue] = useState(0);
+  const [jawRatio, setJawRatio] = useState(1.0);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const handleVisemeChange = useCallback((details: { value: number[] }) => {
+    const v = details.value[0];
+    setValue(v);
+
+    // Use setViseme to apply both morph AND jaw bone rotation in sync
+    // This avoids conflicting with AU 26 which would cause double jaw movement
+    if (engine) {
+      const visemeIndex = VISEME_KEYS.indexOf(visemeKey);
+      if (visemeIndex >= 0) {
+        engine.setViseme(visemeIndex, v, jawRatio);
+      } else {
+        // Fallback for unknown viseme keys
+        engine.setMorph(visemeKey, v);
+      }
+    }
+  }, [visemeKey, engine, jawRatio]);
+
+  const handleJawRatioChange = useCallback((details: { value: number[] }) => {
+    const v = details.value[0];
+    setJawRatio(v);
+
+    // Re-apply current viseme with new jaw ratio using setViseme
+    if (engine && value > 0) {
+      const visemeIndex = VISEME_KEYS.indexOf(visemeKey);
+      if (visemeIndex >= 0) {
+        engine.setViseme(visemeIndex, value, v);
+      }
+    }
+  }, [visemeKey, engine, value]);
+
+  return (
+    <VStack width="100%" align="stretch" gap={2}>
+      <Box>
+        <Text mb="2" fontSize="sm">
+          {visemeKey}
+        </Text>
+        <Slider.Root
+          value={[value]}
+          min={0}
+          max={1}
+          step={0.01}
+          disabled={disabled}
+          onValueChange={handleVisemeChange}
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+        >
+          <Slider.Control>
+            <Slider.Track>
+              <Slider.Range style={{ background: getSliderColor(value) }} />
+            </Slider.Track>
+            <Tooltip.Root open={showTooltip}>
+              <Tooltip.Trigger asChild>
+                <Slider.Thumb index={0} boxSize={6} />
+              </Tooltip.Trigger>
+              <Tooltip.Positioner>
+                <Tooltip.Content bg="gray.300" color="black">
+                  {`${(value * 100).toFixed(0)}%`}
+                </Tooltip.Content>
+              </Tooltip.Positioner>
+            </Tooltip.Root>
+          </Slider.Control>
+        </Slider.Root>
+      </Box>
+
+      {/* Lip ↔ Jaw ratio slider */}
+      <Box pt={2} borderTop="1px solid rgba(255,255,255,0.12)">
+        <HStack mb={1} justify="space-between">
+          <Text fontSize="xs" opacity={0.8}>Lip ↔ Jaw</Text>
+          <Text fontSize="xs" opacity={0.6}>
+            {jawRatio.toFixed(2)}
+          </Text>
+        </HStack>
+        <Slider.Root
+          aria-label={[`${visemeKey}-jaw-ratio`]}
+          min={0}
+          max={1}
+          step={0.01}
+          value={[jawRatio]}
+          disabled={disabled}
+          onValueChange={handleJawRatioChange}
+        >
+          <Slider.Control>
+            <Slider.Track>
+              <Slider.Range />
+            </Slider.Track>
+            <Slider.Thumb index={0} boxSize={4} />
+          </Slider.Control>
+        </Slider.Root>
+      </Box>
+    </VStack>
+  );
+});
+
 interface VisemeSectionProps {
   engine?: EngineThree | null;
-  visemeStates: Record<string, number>;
-  onVisemeChange: (key: string, value: number) => void;
   disabled?: boolean;
   useCurveEditor?: boolean;
   visemeSnippetCurves?: Record<string, SnippetCurveData[]>;
@@ -29,30 +154,22 @@ interface VisemeSectionProps {
 /**
  * VisemeSection - Controls for viseme blendshapes
  * Visemes are phoneme-based mouth shapes used for speech animation
- *
- * Maps each viseme to appropriate jaw opening amount (0-1 scale)
+ * UNCONTROLLED - each slider manages its own state
  */
-export default function VisemeSection({
+function VisemeSection({
   engine,
-  visemeStates,
-  onVisemeChange,
   disabled = false,
   useCurveEditor = false,
   visemeSnippetCurves = {},
   defaultExpanded = false
 }: VisemeSectionProps) {
   const { anim } = useEngineState();
-  const toast = useToast();
-  const [tooltipStates, setTooltipStates] = useState<Record<string, boolean>>({});
-  const [jawRatios, setJawRatios] = useState<Record<string, number>>({});
 
   // Create a new animation snippet for a viseme
-  const createNewVisemeAnimation = (visemeIndex: number, visemeKey: string) => {
+  const createNewVisemeAnimation = useCallback((visemeIndex: number, visemeKey: string) => {
     if (!anim) {
-      toast({
+      toaster.error({
         title: 'Animation service not available',
-        status: 'error',
-        duration: 3000
       });
       return;
     }
@@ -60,11 +177,7 @@ export default function VisemeSection({
     const name = prompt(`Enter name for ${visemeKey} (viseme ${visemeIndex}) animation:`, `${visemeKey.toLowerCase()}_${Date.now()}`);
     if (!name) return;
 
-    // Get current viseme intensity from state (0-1 range), convert to 0-100 for animation curves
-    const currentIntensity = (visemeStates[visemeKey] ?? 0) * 100;
-
     // Create a default animation with a simple rise-and-fall curve
-    // Start and end from current slider position
     const snippet = {
       name,
       snippetCategory: 'visemeSnippet',
@@ -74,10 +187,10 @@ export default function VisemeSection({
       loop: false,
       curves: {
         [visemeIndex]: [
-          { time: 0.0, intensity: currentIntensity },
+          { time: 0.0, intensity: 0 },
           { time: 0.3, intensity: 90 },
           { time: 0.7, intensity: 90 },
-          { time: 1.0, intensity: currentIntensity }
+          { time: 1.0, intensity: 0 }
         ]
       }
     };
@@ -85,53 +198,21 @@ export default function VisemeSection({
     anim.schedule(snippet);
     anim.setSnippetPlaying(name, true);
 
-    toast({
+    toaster.success({
       title: 'Viseme animation created',
       description: `${name} added to animation service`,
-      status: 'success',
-      duration: 3000
     });
-  };
-
-  // Jaw opening intensity per viseme (0 = closed, 1 = fully open)
-  const VISEME_JAW_MAP: Record<string, number> = {
-    'Ah': 1.0,      // Wide open
-    'W_OO': 0.4,    // Rounded, moderate open
-    'Oh': 0.7,      // Medium-wide open
-    'EE': 0.2,      // Slight open, lips spread
-    'Er': 0.4,      // Medium open
-    'IH': 0.3,      // Small open
-    'AE': 0.6,      // Medium-wide open (as in "cat")
-    'R': 0.3,       // Small open
-    'S_Z': 0.1,     // Nearly closed
-    'Ch_J': 0.2,    // Slight open
-    'F_V': 0.15,    // Nearly closed, teeth on lip
-    'TH': 0.2,      // Slight open for tongue
-    'T_L_D_N': 0.15, // Slight open for tongue-teeth contact
-    'B_M_P': 0.0,   // Closed (bilabial)
-    'K_G_H_NG': 0.3, // Medium open (velar/glottal)
-  };
-
-  const getSliderColor = (value: number): string => {
-    const teal = { r: 0, g: 128, b: 128 };
-    const magenta = { r: 255, g: 0, b: 255 };
-    const r = Math.round(teal.r + (magenta.r - teal.r) * value);
-    const g = Math.round(teal.g + (magenta.g - teal.g) * value);
-    const b = Math.round(teal.b + (magenta.b - teal.b) * value);
-    return `rgb(${r}, ${g}, ${b})`;
-  };
+  }, [anim]);
 
   // If curve editor mode, render curve editors for all visemes (one per snippet)
   if (useCurveEditor) {
     return (
       <DockableAccordionItem title="Visemes (Speech)" isDefaultExpanded={defaultExpanded}>
-        <VStack spacing={4} mt={2} align="stretch">
+        <VStack gap={4} mt={2} align="stretch">
           {VISEME_KEYS.map((key, index) => {
             // Viseme snippets use numeric indices (0-21) as curve IDs
             // Map the ARKit key to its index to find the curves
             const snippetCurves = visemeSnippetCurves[index.toString()] || [];
-
-            console.log(`[VisemeSection] Checking viseme ${key} (index ${index}):`, snippetCurves.length, 'curves');
 
             // If no curves, show placeholder with add button
             if (snippetCurves.length === 0) {
@@ -143,12 +224,11 @@ export default function VisemeSection({
                     </Text>
                     <Button
                       size="xs"
-                      leftIcon={<AddIcon />}
-                      colorScheme="brand"
+                      colorPalette="brand"
                       variant="outline"
                       onClick={() => createNewVisemeAnimation(index, key)}
                     >
-                      Add Animation
+                      <Plus size={14} /> Add Animation
                     </Button>
                   </HStack>
                 </Box>
@@ -157,7 +237,7 @@ export default function VisemeSection({
 
             // Render one curve editor per snippet
             return (
-              <VStack key={key} w="100%" spacing={3} align="stretch">
+              <VStack key={key} w="100%" gap={3} align="stretch">
                 {snippetCurves.map((curveData, idx) => (
                   <Box key={`${key}-${curveData.snippetName}-${idx}`} w="100%">
                     <CurveEditor
@@ -167,12 +247,6 @@ export default function VisemeSection({
                       duration={curveData.snippet.duration || 2.0}
                       currentTime={curveData.snippet.currentTime || 0}
                       isPlaying={curveData.snippet.isPlaying || false}
-                      onChange={(updated) => {
-                        // Note: In this read-only view from animation service,
-                        // we don't update the snippets directly. The animation service
-                        // controls the keyframes. This is just for visualization.
-                        console.log('Viseme curve edited:', key, index, curveData.snippetName, updated);
-                      }}
                     />
                   </Box>
                 ))}
@@ -187,89 +261,19 @@ export default function VisemeSection({
   // Otherwise, render sliders (existing behavior)
   return (
     <DockableAccordionItem title="Visemes (Speech)" isDefaultExpanded={defaultExpanded}>
-      <VStack spacing={4} mt={2} align="stretch">
-        {VISEME_KEYS.map((key) => {
-          const value = visemeStates[key] ?? 0;
-          const jawRatio = jawRatios[key] ?? 1.0; // Default to full jaw rotation
-
-          return (
-            <VStack key={key} width="100%" align="stretch" spacing={2}>
-              <Box>
-                <Text mb="2" fontSize="sm">
-                  {key}
-                </Text>
-                <Slider
-                  value={value}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  isDisabled={disabled}
-                  onChange={(v) => {
-                    onVisemeChange(key, v);
-                    engine?.setMorph(key, v);
-
-                    // Apply jaw bone rotation based on viseme type and ratio
-                    if (engine) {
-                      const jawAmount = VISEME_JAW_MAP[key] ?? 0;
-                      // Scale the jaw opening by viseme intensity, jaw mapping, and user-controlled ratio
-                      // AU 26 = Jaw Drop with bone rotation
-                      engine.setAU(26, v * jawAmount * jawRatio);
-                    }
-                  }}
-                  onMouseEnter={() => setTooltipStates(prev => ({ ...prev, [key]: true }))}
-                  onMouseLeave={() => setTooltipStates(prev => ({ ...prev, [key]: false }))}
-                >
-                  <SliderTrack>
-                    <SliderFilledTrack bg={getSliderColor(value)} />
-                  </SliderTrack>
-                  <Tooltip
-                    hasArrow
-                    label={`${(value * 100).toFixed(0)}%`}
-                    bg="gray.300"
-                    color="black"
-                    placement="top"
-                    isOpen={tooltipStates[key]}
-                  >
-                    <SliderThumb boxSize={6} />
-                  </Tooltip>
-                </Slider>
-              </Box>
-
-              {/* Lip ↔ Jaw ratio slider */}
-              <Box pt={2} borderTop="1px solid rgba(255,255,255,0.12)">
-                <HStack mb={1} justify="space-between">
-                  <Text fontSize="xs" opacity={0.8}>Lip ↔ Jaw</Text>
-                  <Text fontSize="xs" opacity={0.6}>
-                    {jawRatio.toFixed(2)}
-                  </Text>
-                </HStack>
-                <Slider
-                  aria-label={`${key}-jaw-ratio`}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={jawRatio}
-                  isDisabled={disabled}
-                  onChange={(v) => {
-                    setJawRatios(prev => ({ ...prev, [key]: v }));
-
-                    // Re-apply current viseme with new jaw ratio
-                    if (engine && value > 0) {
-                      const jawAmount = VISEME_JAW_MAP[key] ?? 0;
-                      engine.setAU(26, value * jawAmount * v);
-                    }
-                  }}
-                >
-                  <SliderTrack>
-                    <SliderFilledTrack />
-                  </SliderTrack>
-                  <SliderThumb boxSize={4} />
-                </Slider>
-              </Box>
-            </VStack>
-          );
-        })}
+      <VStack gap={4} mt={2} align="stretch">
+        {VISEME_KEYS.map((key) => (
+          <VisemeSlider
+            key={key}
+            visemeKey={key}
+            disabled={disabled}
+            engine={engine}
+          />
+        ))}
       </VStack>
     </DockableAccordionItem>
   );
 }
+
+// Memoize the section to prevent rerenders from parent state changes
+export default memo(VisemeSection);

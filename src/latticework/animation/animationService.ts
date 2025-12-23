@@ -1,5 +1,5 @@
 import { createActor, type Actor } from 'xstate';
-import { Subject, BehaviorSubject, Observable } from 'rxjs';
+import { Subject, Observable } from 'rxjs';
 import { filter, map, distinctUntilChanged, throttleTime, shareReplay } from 'rxjs/operators';
 import { animationMachine } from './animationMachine';
 import type { HostCaps, ScheduleOpts, NormalizedSnippet } from './types';
@@ -7,7 +7,6 @@ import { AnimationScheduler as Scheduler } from './animationScheduler';
 import type {
   AnimationEvent,
   SnippetUIState,
-  AnimationStateSnapshot,
   KeyframeCompletedEvent,
   GlobalPlaybackChangedEvent,
 } from './animationEvents';
@@ -284,41 +283,24 @@ function toUIState(sn: NormalizedSnippet): SnippetUIState {
 /**
  * AnimationEventEmitter - Central event stream for animation state changes.
  *
- * Emits discrete events (not continuous tick-based updates) when:
+ * Emits discrete events (not snapshots) when:
  * - Keyframe transitions complete
  * - Snippet play/pause/stop state changes
  * - Loop iterations complete
  * - Snippets are added/removed
  * - Parameters change (rate, intensity, loop)
  *
- * React components subscribe via custom hooks in useAnimationStream.ts
+ * React hooks subscribe to events and read state from XState actor on demand.
+ * No intermediate state copying - events are just notifications.
  */
 class AnimationEventEmitter {
   private event$ = new Subject<AnimationEvent>();
-  private stateSnapshot$ = new BehaviorSubject<AnimationStateSnapshot>({
-    globalState: 'stopped',
-    snippets: [],
-  });
-
   private _getSnippets: (() => NormalizedSnippet[]) | null = null;
+  private _globalState: 'playing' | 'paused' | 'stopped' = 'stopped';
 
   /** Observable stream of discrete animation events */
   get events(): Observable<AnimationEvent> {
     return this.event$.asObservable();
-  }
-
-  /** Observable stream of animation state snapshots */
-  get state(): Observable<AnimationStateSnapshot> {
-    return this.stateSnapshot$.asObservable();
-  }
-
-  /** Get current state synchronously (for initial hook values) */
-  getCurrentState(): AnimationStateSnapshot {
-    return this.stateSnapshot$.getValue();
-  }
-
-  private now(): number {
-    return typeof performance !== 'undefined' ? performance.now() : Date.now();
   }
 
   /**
@@ -327,30 +309,31 @@ class AnimationEventEmitter {
    */
   setSnippetAccessor(getSnippets: () => NormalizedSnippet[]) {
     this._getSnippets = getSnippets;
-    this.updateSnapshot();
   }
 
-  /** Update snapshot from XState actor state */
-  updateSnapshot() {
-    if (!this._getSnippets) return;
-    const snippets = this._getSnippets();
-    const current = this.stateSnapshot$.getValue();
-    this.stateSnapshot$.next({
-      globalState: current.globalState,
-      snippets: snippets.map(toUIState),
-    });
+  /** Read current snippets from XState actor (for initial hook values) */
+  getSnippets(): SnippetUIState[] {
+    if (!this._getSnippets) return [];
+    return this._getSnippets().map(toUIState);
   }
 
-  /** Update just the currentTime for a snippet (efficient for keyframe updates) */
-  private updateSnippetTime(snippetName: string, time: number) {
-    const current = this.stateSnapshot$.getValue();
-    const snippets = current.snippets.map(s =>
-      s.name === snippetName ? { ...s, currentTime: time } : s
-    );
-    this.stateSnapshot$.next({ ...current, snippets });
+  /** Get a single snippet by name */
+  getSnippet(name: string): SnippetUIState | null {
+    if (!this._getSnippets) return null;
+    const sn = this._getSnippets().find(s => s.name === name);
+    return sn ? toUIState(sn) : null;
   }
 
-  // ============ Event Emitters ============
+  /** Get current global playback state */
+  getGlobalState(): 'playing' | 'paused' | 'stopped' {
+    return this._globalState;
+  }
+
+  private now(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  // ============ Event Emitters (just emit, no state copying) ============
 
   emitSnippetAdded(snippetName: string) {
     this.event$.next({
@@ -358,7 +341,6 @@ class AnimationEventEmitter {
       snippetName,
       timestamp: this.now(),
     });
-    this.updateSnapshot();
   }
 
   emitSnippetRemoved(snippetName: string) {
@@ -367,7 +349,6 @@ class AnimationEventEmitter {
       snippetName,
       timestamp: this.now(),
     });
-    this.updateSnapshot();
   }
 
   emitPlayStateChanged(snippetName: string, isPlaying: boolean) {
@@ -377,7 +358,6 @@ class AnimationEventEmitter {
       isPlaying,
       timestamp: this.now(),
     });
-    this.updateSnapshot();
   }
 
   emitSnippetLooped(data: { snippetName: string; iteration: number; localTime: number }) {
@@ -394,7 +374,6 @@ class AnimationEventEmitter {
       snippetName,
       timestamp: this.now(),
     });
-    this.updateSnapshot();
   }
 
   emitKeyframeCompleted(data: {
@@ -409,18 +388,15 @@ class AnimationEventEmitter {
       ...data,
       timestamp: this.now(),
     });
-    // Update just the time (efficient - no full snapshot rebuild)
-    this.updateSnippetTime(data.snippetName, data.currentTime);
   }
 
   emitGlobalPlaybackChanged(state: 'playing' | 'paused' | 'stopped') {
+    this._globalState = state;
     this.event$.next({
       type: 'GLOBAL_PLAYBACK_CHANGED',
       state,
       timestamp: this.now(),
     });
-    const current = this.stateSnapshot$.getValue();
-    this.stateSnapshot$.next({ ...current, globalState: state });
   }
 
   emitSnippetSeeked(snippetName: string, time: number) {
@@ -430,7 +406,6 @@ class AnimationEventEmitter {
       time,
       timestamp: this.now(),
     });
-    this.updateSnippetTime(snippetName, time);
   }
 
   emitParamsChanged(snippetName: string, params: {
@@ -444,7 +419,6 @@ class AnimationEventEmitter {
       params,
       timestamp: this.now(),
     });
-    this.updateSnapshot();
   }
 }
 
@@ -452,35 +426,40 @@ class AnimationEventEmitter {
 export const animationEventEmitter = new AnimationEventEmitter();
 
 // ============================================================================
-// Derived Observables - Factory functions for component subscriptions
+// Derived Observables - Event-based subscriptions (no snapshots)
 // ============================================================================
 
 /**
  * Observable of snippet list changes (add/remove only).
- * More efficient than full state when only list structure matters.
+ * Reads from XState actor on each event - no intermediate state copying.
  */
 export const snippetList$: Observable<string[]> = animationEventEmitter.events.pipe(
   filter(e => e.type === 'SNIPPET_ADDED' || e.type === 'SNIPPET_REMOVED'),
-  map(() => animationEventEmitter.getCurrentState().snippets.map(s => s.name)),
-  distinctUntilChanged((a, b) => a.length === b.length && a.every((v, i) => v === b[i])),
+  map(() => animationEventEmitter.getSnippets().map((s: SnippetUIState) => s.name)),
+  distinctUntilChanged((a, b) => a.length === b.length && a.every((v: string, i: number) => v === b[i])),
   shareReplay(1)
 );
 
 /**
  * Factory for per-snippet state observables.
- * Each snippet gets its own filtered stream.
- *
- * @param snippetName - Name of the snippet to subscribe to
+ * Listens to events that affect a specific snippet and reads current state on demand.
  */
 export function snippetState$(snippetName: string): Observable<SnippetUIState | null> {
-  return animationEventEmitter.state.pipe(
-    map(snapshot => snapshot.snippets.find(s => s.name === snippetName) ?? null),
+  return animationEventEmitter.events.pipe(
+    // Only react to events for this snippet (or structural events)
+    filter(e => {
+      if (e.type === 'SNIPPET_ADDED' || e.type === 'SNIPPET_REMOVED') return true;
+      if ('snippetName' in e && e.snippetName === snippetName) return true;
+      return false;
+    }),
+    // Read current state from XState actor
+    map(() => animationEventEmitter.getSnippet(snippetName)),
     distinctUntilChanged((a, b) => {
       if (!a || !b) return a === b;
       return (
         a.isPlaying === b.isPlaying &&
         a.loop === b.loop &&
-        Math.abs(a.currentTime - b.currentTime) < 0.05 && // Threshold for time updates
+        Math.abs(a.currentTime - b.currentTime) < 0.05 &&
         a.playbackRate === b.playbackRate &&
         a.intensityScale === b.intensityScale
       );
@@ -491,10 +470,7 @@ export function snippetState$(snippetName: string): Observable<SnippetUIState | 
 
 /**
  * Throttled currentTime updates for a specific snippet.
- * Prevents UI jitter by limiting update frequency.
- *
- * @param snippetName - Name of the snippet
- * @param throttleMs - Minimum interval between updates (default: 100ms)
+ * Uses event data directly - no state reading needed.
  */
 export function snippetTime$(snippetName: string, throttleMs = 100): Observable<number> {
   return animationEventEmitter.events.pipe(
@@ -510,6 +486,7 @@ export function snippetTime$(snippetName: string, throttleMs = 100): Observable<
 
 /**
  * Global playback state observable.
+ * Uses event data directly.
  */
 export const globalPlaybackState$: Observable<'playing' | 'paused' | 'stopped'> =
   animationEventEmitter.events.pipe(

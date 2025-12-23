@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, VStack, Text, Progress, IconButton, Tooltip, HStack, Badge } from '@chakra-ui/react';
-import { PhoneIcon } from '@chakra-ui/icons';
+import { Phone } from 'lucide-react';
 import { ModuleSettings } from '../../types/modules';
 import { createTTSService } from '../../latticework/tts';
 import { createTranscriptionService } from '../../latticework/transcription';
@@ -447,7 +447,7 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
           minWidth="400px"
           zIndex={1000}
         >
-          <VStack spacing={4} align="stretch">
+          <VStack gap={4} align="stretch">
             <HStack justify="space-between" align="center">
               <Text fontSize="sm" color="gray.600">
                 Question {currentQuestionIndex + 1} of {frenchQuestions.length}
@@ -455,11 +455,15 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
 
             </HStack>
 
-            <Progress
+            <Progress.Root
               value={((currentQuestionIndex + 1) / frenchQuestions.length) * 100}
-              colorScheme="blue"
+              colorPalette="blue"
               size="sm"
-            />
+            >
+              <Progress.Track>
+                <Progress.Range />
+              </Progress.Track>
+            </Progress.Root>
 
             <Text fontSize="lg" fontWeight="bold">
               Que veut dire "{currentQuestion.french}" en anglais ?
@@ -476,30 +480,33 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
             {/* Manual Control - Mic Icon */}
             <Box
               animation={conversationState === 'userSpeaking' ? 'pulse 1.5s ease-in-out infinite' : undefined}
-              sx={{
+              css={{
                 '@keyframes pulse': {
                   '0%, 100%': { transform: 'scale(1)', opacity: 1 },
                   '50%': { transform: 'scale(1.1)', opacity: 0.8 },
                 },
               }}
             >
-              <Tooltip
-                label={
-                  conversationState === 'userSpeaking'
-                    ? 'Listening... Click to stop'
-                    : 'Click to listen'
-                }
-                placement="top"
-              >
-                <IconButton
-                  aria-label={conversationState === 'userSpeaking' ? 'Stop listening' : 'Start listening'}
-                  icon={<PhoneIcon />}
-                  isRound
-                  size="lg"
-                  colorScheme={conversationState === 'userSpeaking' ? 'green' : 'gray'}
-                  onClick={conversationState === 'userSpeaking' ? stopListening : forceListening}
-                />
-              </Tooltip>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <IconButton
+                    aria-label={conversationState === 'userSpeaking' ? 'Stop listening' : 'Start listening'}
+                    rounded="full"
+                    size="lg"
+                    colorPalette={conversationState === 'userSpeaking' ? 'green' : 'gray'}
+                    onClick={conversationState === 'userSpeaking' ? stopListening : forceListening}
+                  >
+                    <Phone />
+                  </IconButton>
+                </Tooltip.Trigger>
+                <Tooltip.Positioner>
+                  <Tooltip.Content>
+                    {conversationState === 'userSpeaking'
+                      ? 'Listening... Click to stop'
+                      : 'Click to listen'}
+                  </Tooltip.Content>
+                </Tooltip.Positioner>
+              </Tooltip.Root>
             </Box>
 
             {lastFeedback && (

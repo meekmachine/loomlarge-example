@@ -68,6 +68,22 @@ export type Snippet = {
    */
   snippetJawScale?: number;
 
+  /**
+   * Global left/right balance for bilateral AUs in this snippet.
+   * Controls asymmetry for AUs with separate L/R morphs (smile, brow, blink, etc.)
+   * - -1 = left side only
+   * -  0 = both sides equally (default)
+   * - +1 = right side only
+   */
+  snippetBalance?: number;
+
+  /**
+   * Per-AU balance overrides. Keys are AU IDs (as strings).
+   * Allows different bilateral balance for each AU in the snippet.
+   * Example: { "12": -0.5, "4": 0.3 } means AU 12 is left-biased, AU 4 is right-biased
+   */
+  snippetBalanceMap?: Record<string, number>;
+
   // Mixer (AnimationMixer) metadata for clip-backed blending
   mixerChannel?: string;
   mixerBlendMode?: MixerBlendMode;
@@ -102,6 +118,8 @@ export type NormalizedSnippet = {
   snippetPriority: number;
   snippetBlendMode: 'replace' | 'additive';  // Blend mode for AU combination
   snippetJawScale: number;  // Jaw bone activation multiplier for viseme snippets
+  snippetBalance: number;  // Global L/R balance for bilateral AUs (-1 to +1)
+  snippetBalanceMap: Record<string, number>;  // Per-AU balance overrides
 
   // Mixer (AnimationMixer) metadata
   mixerChannel?: string;
@@ -168,8 +186,6 @@ export interface KeyframeHitEvent {
   }>;
 }
 
-export interface UIProgressEvent { type: 'UI_PROGRESS' }
-
 export interface ManualSetEvent {
   type: 'MANUAL_SET';
   id: string | number;
@@ -206,7 +222,6 @@ export type AnimEvent =
   | StopAllEvent
   | CurveChangedEvent
   | KeyframeHitEvent
-  | UIProgressEvent
   | ManualSetEvent
   | ManualClearEvent
   | SnippetLoopEvent

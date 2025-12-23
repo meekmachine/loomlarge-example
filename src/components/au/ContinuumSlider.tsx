@@ -1,10 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, memo, useRef } from 'react';
 import {
   Box,
   Slider,
-  SliderTrack,
-  SliderFilledTrack,
-  SliderThumb,
   Tooltip,
   Text,
   HStack,
@@ -13,48 +10,80 @@ import {
 import { AUInfo, AU_MIX_DEFAULTS } from '../../engine/arkit/shapeDict';
 import { EngineThree } from '../../engine/EngineThree';
 
+// Labels for continuum axes
+const CONTINUUM_LABELS: Record<string, string> = {
+  '61-62': 'Eyes — Horizontal',
+  '64-63': 'Eyes — Vertical',
+  '31-32': 'Head — Horizontal',
+  '54-33': 'Head — Vertical',
+  '55-56': 'Head — Tilt',
+  '30-35': 'Jaw — Horizontal',
+  '38-37': 'Tongue — Vertical',
+  '39-40': 'Tongue — Horizontal',
+  '41-42': 'Tongue — Tilt',
+  '73-74': 'Tongue — Width',
+  '76-77': 'Tongue Tip — Vertical',
+};
+
 interface ContinuumSliderProps {
   negativeAU: AUInfo;
   positiveAU: AUInfo;
-  value: number; // -1 to 1
-  onChange: (value: number) => void;
-  engine?: EngineThree; // Optional: for morph/bone blend control
+  initialValue?: number; // -1 to 1
+  engine?: EngineThree | null; // Optional: for morph/bone blend control
   showBlendSlider?: boolean; // Whether to show the morph/bone blend slider
   disabled?: boolean;
+  onValueChange?: (negId: string, posId: string, value: number) => void; // Optional callback for parent tracking
 }
+
+// Color helper - defined outside component
+const getSliderColor = (val: number): string => {
+  if (val < 0) {
+    const intensity = Math.abs(val);
+    return `rgba(66, 153, 225, ${intensity})`; // blue
+  } else {
+    return `rgba(237, 137, 54, ${val})`; // orange
+  }
+};
 
 /**
  * ContinuumSlider - Bidirectional slider for paired AUs (e.g., Head Left <-> Right)
+ * UNCONTROLLED component - manages its own state and syncs directly to engine
  * Range: -1 (negative AU) to +1 (positive AU)
  * Calls engine.setContinuum() directly for unified morph + bone handling.
  */
 const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
   negativeAU,
   positiveAU,
-  value,
-  onChange,
+  initialValue = 0,
   engine,
   showBlendSlider = false,
-  disabled = false
+  disabled = false,
+  onValueChange
 }) => {
+  // Internal state - component is uncontrolled
+  const [value, setValue] = useState(initialValue);
   const [showTooltip, setShowTooltip] = useState(false);
+
+  // Stable ref for callback
+  const onValueChangeRef = useRef(onValueChange);
+  onValueChangeRef.current = onValueChange;
+
   const negId = parseInt(negativeAU.id);
   const posId = parseInt(positiveAU.id);
 
-  // Handle slider change - calls engine.setContinuum directly (like AUSlider calls setAU)
-  const handleSliderChange = (val: number) => {
-    onChange(val);
-    engine?.setContinuum(negId, posId, val);
-  };
+  // Get header label for this continuum pair
+  const continuumKey = `${negId}-${posId}`;
+  const headerLabel = CONTINUUM_LABELS[continuumKey] ?? `AU ${negId} ↔ AU ${posId}`;
 
-  // Color: blue for negative, neutral in center, orange for positive
-  const getSliderColor = (val: number): string => {
-    if (val < 0) {
-      const intensity = Math.abs(val);
-      return `rgba(66, 153, 225, ${intensity})`; // blue
-    } else {
-      return `rgba(237, 137, 54, ${val})`; // orange
-    }
+  // Handle slider change - calls engine.setContinuum directly
+  const handleSliderChange = (details: { value: number[] }) => {
+    const val = details.value[0];
+    setValue(val);
+
+    // Notify parent if callback provided
+    onValueChangeRef.current?.(negativeAU.id, positiveAU.id, val);
+
+    engine?.setContinuum(negId, posId, val);
   };
 
   // Determine which AU is the "base" for mix weight:
@@ -79,7 +108,8 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
   };
 
   // Update mix weight in engine and local state - set for BOTH AUs in the pair
-  const handleMixChange = (v: number) => {
+  const handleMixChange = (details: { value: number[] }) => {
+    const v = details.value[0];
     setMixValue(v);
     if (engine) {
       engine.setAUMixWeight(negId, v);
@@ -88,8 +118,13 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
   };
 
   return (
-    <VStack width="100%" align="stretch" spacing={2}>
+    <VStack width="100%" align="stretch" gap={2}>
       <Box>
+        {/* Header with AU IDs and label */}
+        <Text mb={1} fontSize="sm" color="gray.50">
+          {negId}/{posId} - {headerLabel}
+        </Text>
+
         <HStack justify="space-between" mb={2}>
           <Text fontSize="xs" color="gray.300">
             {negativeAU.name}
@@ -102,30 +137,32 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
           </Text>
         </HStack>
 
-        <Slider
-          value={value}
+        <Slider.Root
+          value={[value]}
           min={-1}
           max={1}
           step={0.01}
-          isDisabled={disabled}
-          onChange={handleSliderChange}
+          disabled={disabled}
+          onValueChange={handleSliderChange}
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
         >
-          <SliderTrack>
-            <SliderFilledTrack bg={getSliderColor(value)} />
-          </SliderTrack>
-          <Tooltip
-            hasArrow
-            label={`${(value * 100).toFixed(0)}%`}
-            bg="gray.300"
-            color="black"
-            placement="top"
-            isOpen={showTooltip}
-          >
-            <SliderThumb boxSize={6} />
-          </Tooltip>
-        </Slider>
+          <Slider.Control>
+            <Slider.Track>
+              <Slider.Range style={{ background: getSliderColor(value) }} />
+            </Slider.Track>
+            <Tooltip.Root open={showTooltip}>
+              <Tooltip.Trigger asChild>
+                <Slider.Thumb index={0} boxSize={6} />
+              </Tooltip.Trigger>
+              <Tooltip.Positioner>
+                <Tooltip.Content bg="gray.300" color="black">
+                  {`${(value * 100).toFixed(0)}%`}
+                </Tooltip.Content>
+              </Tooltip.Positioner>
+            </Tooltip.Root>
+          </Slider.Control>
+        </Slider.Root>
       </Box>
 
       {/* Morph ↔ Bone blend slider */}
@@ -137,24 +174,27 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
               {getMix().toFixed(2)}
             </Text>
           </HStack>
-          <Slider
-            aria-label="morph-bone-blend"
+          <Slider.Root
+            aria-label={["morph-bone-blend"]}
             min={0}
             max={1}
             step={0.01}
-            value={getMix()}
-            isDisabled={disabled}
-            onChange={handleMixChange}
+            value={[getMix()]}
+            disabled={disabled}
+            onValueChange={handleMixChange}
           >
-            <SliderTrack>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb boxSize={4} />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range />
+              </Slider.Track>
+              <Slider.Thumb index={0} boxSize={4} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
       )}
     </VStack>
   );
 };
 
-export default ContinuumSlider;
+// Memoize to prevent rerenders when parent state changes
+export default memo(ContinuumSlider);

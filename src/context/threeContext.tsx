@@ -3,13 +3,11 @@ import { EngineThree } from '../engine/EngineThree';
 
 export type ThreeContextValue = {
   engine: EngineThree;
-  /** Animation service handle (owned by EngineThree) */
-  anim: EngineThree['anim'];
-  /** Subscribe to the central frame loop. Returns an unsubscribe function. */
-  addFrameListener: (callback: (deltaSeconds: number) => void) => () => void;
+  /** Animation service handle (lazy getter - defers initialization until first access) */
+  get anim(): EngineThree['anim'];
 };
 
-export const ThreeCtx = createContext<ThreeContextValue | null>(null);
+const ThreeCtx = createContext<ThreeContextValue | null>(null);
 
 /**
  * ThreeProvider - Provides EngineThree and animation service via React context.
@@ -20,37 +18,32 @@ export const ThreeCtx = createContext<ThreeContextValue | null>(null);
 export const ThreeProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   const engineRef = useRef<EngineThree | null>(null);
 
-  // Create engine singleton
+  // Create engine singleton (once, outside of render cycle)
   if (!engineRef.current) {
     engineRef.current = new EngineThree();
-    // Set dev handle
     if (typeof window !== 'undefined') {
       (window as any).facslib = engineRef.current;
     }
   }
 
+  const engine = engineRef.current;
+
   // Start engine on mount, stop on unmount
   useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine) return;
-
     engine.start();
+    return () => engine.dispose();
+  }, [engine]);
 
-    return () => {
-      engine.dispose();
+  // Stable context value - engine reference never changes
+  const valueRef = useRef<ThreeContextValue | null>(null);
+  if (!valueRef.current) {
+    valueRef.current = {
+      engine,
+      get anim() { return engine.anim; },
     };
-  }, []);
+  }
 
-  const engine = engineRef.current;
-  if (!engine) return null;
-
-  const value: ThreeContextValue = {
-    engine,
-    anim: engine.anim,
-    addFrameListener: (cb) => engine.addFrameListener(cb),
-  };
-
-  return <ThreeCtx.Provider value={value}>{children}</ThreeCtx.Provider>;
+  return <ThreeCtx.Provider value={valueRef.current}>{children}</ThreeCtx.Provider>;
 };
 
 export function useThreeState() {

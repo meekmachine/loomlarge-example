@@ -1,14 +1,15 @@
 /**
  * React Hooks for RxJS Animation Stream
  *
- * These hooks replace `useSelector` from `@xstate/react` with RxJS-based
- * subscriptions that only update when meaningful events occur.
+ * These hooks subscribe to discrete animation events and read state
+ * from the XState actor on demand - no snapshot copying.
  *
  * Benefits:
  * - No tick-based updates
  * - Throttled time updates to prevent UI jitter
  * - Per-snippet subscriptions for granular control
  * - `distinctUntilChanged` prevents redundant re-renders
+ * - Events are just notifications; state is read from XState actor
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -23,29 +24,7 @@ import {
 import type {
   AnimationEvent,
   SnippetUIState,
-  AnimationStateSnapshot,
 } from '../latticework/animation/animationEvents';
-
-// ============ Hook: Full animation state ============
-
-/**
- * Subscribe to the full animation state snapshot.
- * Use for components that need the complete snippet list.
- *
- * Replaces: useSelector(anim?.actor, state => state?.context?.animations)
- */
-export function useAnimationState(): AnimationStateSnapshot {
-  const [state, setState] = useState<AnimationStateSnapshot>(() =>
-    animationEventEmitter.getCurrentState()
-  );
-
-  useEffect(() => {
-    const sub = animationEventEmitter.state.subscribe(setState);
-    return () => sub.unsubscribe();
-  }, []);
-
-  return state;
-}
 
 // ============ Hook: Snippet list only ============
 
@@ -57,7 +36,7 @@ export function useAnimationState(): AnimationStateSnapshot {
  */
 export function useSnippetList(): string[] {
   const [names, setNames] = useState<string[]>(() =>
-    animationEventEmitter.getCurrentState().snippets.map(s => s.name)
+    animationEventEmitter.getSnippets().map(s => s.name)
   );
 
   useEffect(() => {
@@ -78,10 +57,9 @@ export function useSnippetList(): string[] {
  * @returns SnippetUIState or null if snippet doesn't exist
  */
 export function useSnippetState(snippetName: string): SnippetUIState | null {
-  const [state, setState] = useState<SnippetUIState | null>(() => {
-    const snapshot = animationEventEmitter.getCurrentState();
-    return snapshot.snippets.find(s => s.name === snippetName) ?? null;
-  });
+  const [state, setState] = useState<SnippetUIState | null>(() =>
+    animationEventEmitter.getSnippet(snippetName)
+  );
 
   useEffect(() => {
     const sub = snippetState$(snippetName).subscribe(setState);
@@ -103,8 +81,8 @@ export function useSnippetState(snippetName: string): SnippetUIState | null {
  */
 export function useSnippetTime(snippetName: string, throttleMs = 100): number {
   const [time, setTime] = useState<number>(() => {
-    const snapshot = animationEventEmitter.getCurrentState();
-    return snapshot.snippets.find(s => s.name === snippetName)?.currentTime ?? 0;
+    const snippet = animationEventEmitter.getSnippet(snippetName);
+    return snippet?.currentTime ?? 0;
   });
 
   useEffect(() => {
@@ -122,7 +100,7 @@ export function useSnippetTime(snippetName: string, throttleMs = 100): number {
  */
 export function useGlobalPlaybackState(): 'playing' | 'paused' | 'stopped' {
   const [state, setState] = useState<'playing' | 'paused' | 'stopped'>(() =>
-    animationEventEmitter.getCurrentState().globalState
+    animationEventEmitter.getGlobalState()
   );
 
   useEffect(() => {
@@ -167,17 +145,20 @@ export function useAnimationEvent(
  * Subscribe to the full snippet array (with UI state for each).
  * Used by PlaybackControls for the grouped snippet list.
  *
- * More efficient than useAnimationState when you only need snippets.
+ * Only updates on add/remove events - not on every parameter change.
  */
 export function useSnippets(): SnippetUIState[] {
   const [snippets, setSnippets] = useState<SnippetUIState[]>(() =>
-    animationEventEmitter.getCurrentState().snippets
+    animationEventEmitter.getSnippets()
   );
 
   useEffect(() => {
-    const sub = animationEventEmitter.state.subscribe(snapshot => {
-      setSnippets(snapshot.snippets);
-    });
+    // Only subscribe to structural changes (add/remove)
+    const sub = animationEventEmitter.events
+      .pipe(filter(e => e.type === 'SNIPPET_ADDED' || e.type === 'SNIPPET_REMOVED'))
+      .subscribe(() => {
+        setSnippets(animationEventEmitter.getSnippets());
+      });
 
     return () => sub.unsubscribe();
   }, []);

@@ -40,10 +40,18 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
   // Tongue
   19: ['Tongue_Out'],
   36: ['Tongue_Bulge_L','Tongue_Bulge_R'],
-  37: [],  // Tongue Up - BONE ONLY
-  38: [],  // Tongue Down - BONE ONLY
-  39: [],  // Tongue Left - BONE ONLY
-  40: [],  // Tongue Right - BONE ONLY
+  37: ['Tongue_Up'],      // Tongue Up - morph + bone rotation
+  38: ['Tongue_Down'],    // Tongue Down - morph + bone rotation
+  39: ['Tongue_L'],       // Tongue Left - morph + bone rotation
+  40: ['Tongue_R'],       // Tongue Right - morph + bone rotation
+  41: [],  // Tongue Tilt Left - BONE ONLY
+  42: [],  // Tongue Tilt Right - BONE ONLY
+  // Extended tongue morphs (CC4-specific)
+  73: ['Tongue_Narrow'],
+  74: ['Tongue_Wide'],
+  75: ['Tongue_Roll'],
+  76: ['Tongue_Tip_Up'],
+  77: ['Tongue_Tip_Down'],
 
   // Jaw / Head (convenience)
   29: ['Jaw_Forward'],
@@ -110,20 +118,20 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
   ],
   // Eyes horizontal (yaw) - CC4 rigs use rz for horizontal eye rotation
   61: [
-    { node: 'EYE_L', channel: 'rz', scale: 1, maxDegrees: 25 },   // Eyes look left
-    { node: 'EYE_R', channel: 'rz', scale: 1, maxDegrees: 25 },
+    { node: 'EYE_L', channel: 'rz', scale: 1, maxDegrees: 32 },   // Eyes look left
+    { node: 'EYE_R', channel: 'rz', scale: 1, maxDegrees: 32 },
   ],
   62: [
-    { node: 'EYE_L', channel: 'rz', scale: -1, maxDegrees: 25 },  // Eyes look right
-    { node: 'EYE_R', channel: 'rz', scale: -1, maxDegrees: 25 },
+    { node: 'EYE_L', channel: 'rz', scale: -1, maxDegrees: 32 },  // Eyes look right
+    { node: 'EYE_R', channel: 'rz', scale: -1, maxDegrees: 32 },
   ],
   63: [
-    { node: 'EYE_L', channel: 'rx', scale: -1, maxDegrees: 20 },
-    { node: 'EYE_R', channel: 'rx', scale: -1, maxDegrees: 20 },
+    { node: 'EYE_L', channel: 'rx', scale: -1, maxDegrees: 32 },
+    { node: 'EYE_R', channel: 'rx', scale: -1, maxDegrees: 32 },
   ],
   64: [
-    { node: 'EYE_L', channel: 'rx', scale: 1, maxDegrees: 20 },
-    { node: 'EYE_R', channel: 'rx', scale: 1, maxDegrees: 20 },
+    { node: 'EYE_L', channel: 'rx', scale: 1, maxDegrees: 32 },
+    { node: 'EYE_R', channel: 'rx', scale: 1, maxDegrees: 32 },
   ],
   // Single-eye (Left) — horizontal (rz for CC4) and vertical (rx)
   65: [ { node: 'EYE_L', channel: 'rz', scale: -1, maxDegrees: 15 } ],
@@ -141,10 +149,10 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
     { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 5.84 },  // 73% of 8
   ],
   26: [
-    { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 14.6 },  // 73% of 20
+    { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 28 },  // 73% of 20
   ],
   27: [ // Mouth Stretch — larger jaw open
-    { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 18.25 }, // 73% of 25
+    { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 32 }, // 73% of 25
   ],
   29: [
     { node: 'JAW', channel: 'tz', scale: -1, maxUnits: 0.02 },  // Negative for forward thrust
@@ -161,16 +169,22 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
     { node: 'TONGUE', channel: 'tz', scale: -1, maxUnits: 0.008 },
   ],
   37: [ // Tongue Up
-    { node: 'TONGUE', channel: 'rx', scale: -1, maxDegrees: 15 },
+    { node: 'TONGUE', channel: 'rz', scale: -1, maxDegrees: 45 },
   ],
   38: [ // Tongue Down
-    { node: 'TONGUE', channel: 'rx', scale: 1, maxDegrees: 15 },
+    { node: 'TONGUE', channel: 'rz', scale: 1, maxDegrees: 45 },
   ],
   39: [ // Tongue Left
     { node: 'TONGUE', channel: 'ry', scale: -1, maxDegrees: 10 },
   ],
   40: [ // Tongue Right
     { node: 'TONGUE', channel: 'ry', scale: 1, maxDegrees: 10 },
+  ],
+  41: [ // Tongue Tilt Left
+    { node: 'TONGUE', channel: 'rx', scale: -1, maxDegrees: 20 },
+  ],
+  42: [ // Tongue Tilt Right
+    { node: 'TONGUE', channel: 'rx', scale: 1, maxDegrees: 20 },
   ],
 };
 
@@ -222,9 +236,9 @@ export const COMPOSITE_ROTATIONS: CompositeRotation[] = [
   },
   {
     node: 'TONGUE',
-    pitch: { aus: [38, 37], axis: 'rx', negative: 38, positive: 37 },  // Tongue down/up
+    pitch: { aus: [38, 37], axis: 'rz', negative: 38, positive: 37 },  // Tongue down/up
     yaw: { aus: [39, 40], axis: 'ry', negative: 39, positive: 40 },    // Tongue left/right
-    roll: null  // Tongue doesn't have roll
+    roll: { aus: [41, 42], axis: 'rx', negative: 41, positive: 42 }    // Tongue tilt left/right
   }
 ];
 
@@ -312,6 +326,14 @@ export const AU_INFO: Record<string, AUInfo> = {
   '38': { id:'38', name:'Tongue Down',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
   '39': { id:'39', name:'Tongue Left',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
   '40': { id:'40', name:'Tongue Right',      faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '41': { id:'41', name:'Tongue Tilt Left',  faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '42': { id:'42', name:'Tongue Tilt Right', faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  // Extended tongue controls (CC4-specific morphs)
+  '73': { id:'73', name:'Tongue Narrow',     faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '74': { id:'74', name:'Tongue Wide',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '75': { id:'75', name:'Tongue Roll',       faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '76': { id:'76', name:'Tongue Tip Up',     faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
+  '77': { id:'77', name:'Tongue Tip Down',   faceArea:'Lower', facePart:'Tongue', faceSection:'Tongue' },
 
   // Jaw (Lower)
   '26': { id:'26', name:'Jaw Drop',          muscularBasis:'masseter (relax temporalis)', links:['https://en.wikipedia.org/wiki/Masseter_muscle'], faceArea:'Lower', facePart:'Jaw', faceSection:'Jaw' },
@@ -412,6 +434,14 @@ export const CONTINUUM_PAIRS_MAP: Record<number, {
   // Tongue pitch (up/down)
   38: { pairId: 37, isNegative: true, axis: 'pitch', node: 'TONGUE' },
   37: { pairId: 38, isNegative: false, axis: 'pitch', node: 'TONGUE' },
+  // Tongue roll (tilt left/right)
+  41: { pairId: 42, isNegative: true, axis: 'roll', node: 'TONGUE' },
+  42: { pairId: 41, isNegative: false, axis: 'roll', node: 'TONGUE' },
+  // Extended tongue morphs (continuum pairs)
+  73: { pairId: 74, isNegative: true, axis: 'yaw', node: 'TONGUE' },  // Tongue Narrow/Wide
+  74: { pairId: 73, isNegative: false, axis: 'yaw', node: 'TONGUE' },
+  76: { pairId: 77, isNegative: false, axis: 'pitch', node: 'TONGUE' }, // Tongue Tip Up/Down
+  77: { pairId: 76, isNegative: true, axis: 'pitch', node: 'TONGUE' },
 };
 
 // ============================================================================

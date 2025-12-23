@@ -3,10 +3,10 @@
  * Handles viseme timeline processing, curve building, and animation scheduling
  * Follows the Animation Agency pattern
  *
- * Uses a simple, sequential viseme pattern matching the working snippet files:
- * - Each viseme has a simple 4-keyframe envelope (ramp up → hold → hold → ramp down)
- * - No overlapping/coarticulation - cleaner, more predictable results
- * - Viseme morphs include mouth opening - no separate jaw AU needed
+ * Uses coarticulation for natural speech animation:
+ * - Visemes overlap to create smooth blending between mouth shapes
+ * - Each viseme extends into neighbors for anticipatory/carryover coarticulation
+ * - Jaw bone movement is coordinated through the viseme system (not AU 26)
  */
 
 import type { LipSyncSnippet } from './lipSyncMachine';
@@ -120,8 +120,8 @@ export class LipSyncScheduler {
   }
 
   /**
-   * Build animation curves with simple sequential viseme pattern
-   * Matches the working snippet file format (no coarticulation)
+   * Build animation curves with coarticulation for natural speech
+   * Visemes overlap and blend into each other for smooth transitions
    */
   private buildCurves(
     visemeTimeline: VisemeEvent[]
@@ -131,51 +131,88 @@ export class LipSyncScheduler {
     // Intensity scaled by config (100 = full intensity like in snippet files)
     const peakIntensity = 100 * this.config.lipsyncIntensity;
 
-    // Build simple sequential viseme curves
-    // Pattern from working snippets: ramp up (20ms) → hold → hold → ramp down (20ms)
-    visemeTimeline.forEach((visemeEvent) => {
+    // Coarticulation parameters - tuned for smooth, snappy transitions
+    const anticipationRatio = 0.10; // Start ramping up 10% before phoneme starts
+    const carryoverRatio = 0.10;    // Continue 10% into next phoneme (reduced from 20%)
+    const rampUpRatio = 0.35;       // Slower ramp up (35%) for smoother onset
+    const rampDownRatio = 0.40;     // Slower ramp down (40%) for smoother release
+
+    visemeTimeline.forEach((visemeEvent, index) => {
       const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
       const curveKey = arkitIndex.toString();
-      const startTime = visemeEvent.offsetMs / 1000;
+      const nominalStart = visemeEvent.offsetMs / 1000;
       const duration = visemeEvent.durationMs / 1000;
 
       // Skip silence visemes (SAPI 0 maps to ARKit 3, but we don't animate pauses)
       if (visemeEvent.visemeId === 0) return;
 
-      // Simple 4-keyframe envelope matching working snippets
-      const rampTime = 0.02; // 20ms ramp (fixed, like in snippets)
-      const holdStart = startTime + rampTime;
-      const holdEnd = startTime + duration - rampTime;
-      const endTime = startTime + duration;
+      // Calculate coarticulated timing
+      const anticipation = duration * anticipationRatio;
+      const carryover = duration * carryoverRatio;
+      const rampUp = Math.max(0.025, duration * rampUpRatio);   // Min 25ms for smooth ramp
+      const rampDown = Math.max(0.030, duration * rampDownRatio); // Min 30ms for smooth release
+
+      // Actual start/end with coarticulation overlap
+      const actualStart = Math.max(0, nominalStart - anticipation);
+      const peakStart = actualStart + rampUp;
+      const peakEnd = nominalStart + duration - rampDown + carryover * 0.5;
+      const actualEnd = nominalStart + duration + carryover;
 
       // Initialize curve if needed
       if (!curves[curveKey]) {
         curves[curveKey] = [];
       }
 
-      // Add the 4-keyframe envelope
-      curves[curveKey].push(
-        { time: startTime, intensity: 0 },        // Start at 0
-        { time: holdStart, intensity: peakIntensity },  // Ramp up to peak
-        { time: holdEnd, intensity: peakIntensity },    // Hold at peak
-        { time: endTime, intensity: 0 }           // Ramp down to 0
-      );
+      // Check if we need to merge with existing keyframes for this viseme
+      // (same viseme appearing multiple times in sequence)
+      const existingKeyframes = curves[curveKey];
+      const lastKeyframe = existingKeyframes[existingKeyframes.length - 1];
+
+      if (lastKeyframe && lastKeyframe.time > actualStart - 0.01) {
+        // Overlapping with previous occurrence of same viseme - extend peak instead
+        // Remove the ramp-down keyframes and extend the hold
+        while (existingKeyframes.length > 0 &&
+               existingKeyframes[existingKeyframes.length - 1].intensity < peakIntensity * 0.9 &&
+               existingKeyframes[existingKeyframes.length - 1].time > actualStart - 0.05) {
+          existingKeyframes.pop();
+        }
+        // Add extended peak and new ramp down
+        curves[curveKey].push(
+          { time: peakEnd, intensity: peakIntensity },
+          { time: actualEnd, intensity: 0 }
+        );
+      } else {
+        // Normal case: add full envelope with coarticulation
+        curves[curveKey].push(
+          { time: actualStart, intensity: 0 },
+          { time: peakStart, intensity: peakIntensity },
+          { time: peakEnd, intensity: peakIntensity },
+          { time: actualEnd, intensity: 0 }
+        );
+      }
     });
+
+    // Sort keyframes by time for each curve (coarticulation can cause out-of-order)
+    for (const curveKey of Object.keys(curves)) {
+      curves[curveKey].sort((a, b) => a.time - b.time);
+    }
 
     return curves;
   }
 
   /**
    * Calculate maximum time from viseme timeline
+   * Accounts for coarticulation carryover extending past nominal end
    */
   private calculateMaxTime(visemeTimeline: VisemeEvent[]): number {
     if (visemeTimeline.length === 0) return 0;
 
     const lastViseme = visemeTimeline[visemeTimeline.length - 1];
     const lastEndTime = (lastViseme.offsetMs + lastViseme.durationMs) / 1000;
+    const carryover = (lastViseme.durationMs / 1000) * 0.10; // Match carryoverRatio
 
-    // Add small neutral hold
-    return lastEndTime + 0.05;
+    // Add carryover time plus minimal buffer
+    return lastEndTime + carryover + 0.02;
   }
 
   /**

@@ -56,6 +56,8 @@ function coerceSnippet(d: NonNullable<LoadAnimationEvent['data']>, playing: bool
     snippetIntensityScale: typeof d.snippetIntensityScale === 'number' ? d.snippetIntensityScale : 1,
     snippetBlendMode: (d as any).snippetBlendMode ?? 'replace',  // Default to 'replace'
     snippetJawScale: typeof (d as any).snippetJawScale === 'number' ? (d as any).snippetJawScale : 1.0,  // Jaw bone activation for visemes
+    snippetBalance: typeof (d as any).snippetBalance === 'number' ? (d as any).snippetBalance : 0,  // Global L/R balance for bilateral AUs
+    snippetBalanceMap: (d as any).snippetBalanceMap ?? {},  // Per-AU balance overrides
     snippetCategory: (d as any).snippetCategory ?? 'default',
     snippetPriority: typeof (d as any).snippetPriority === 'number' ? (d as any).snippetPriority : 0,
     currentTime: 0,
@@ -101,7 +103,6 @@ export const animationMachine = createMachine({
         PAUSE_ALL: { target: 'paused', actions: 'markAllPaused' },
         STOP_ALL: { target: 'stopped', actions: 'markAllPaused' },
         KEYFRAME_HIT: { actions: 'applyBlendValues' },
-        UI_PROGRESS: { actions: 'updateCurrentTimes' },
         CURVE_CHANGED: { actions: 'mergeCurve' },
         MANUAL_SET: { actions: 'manualSet' },
         MANUAL_CLEAR: { actions: 'manualClear' },
@@ -130,12 +131,26 @@ export const animationMachine = createMachine({
     addSnippetPlaying: assign(({ context, event }) => {
       if (event.type !== 'LOAD_ANIMATION' || !event.data) return {};
       const sn = coerceSnippet(event.data, true);
+      // Replace existing snippet with same name instead of adding duplicate
+      const existingIdx = context.animations.findIndex((s) => s?.name === sn.name);
+      if (existingIdx >= 0) {
+        const animations = context.animations.slice();
+        animations[existingIdx] = sn;
+        return { animations };
+      }
       return { animations: [...context.animations, sn] };
     }),
 
     addSnippetPaused: assign(({ context, event }) => {
       if (event.type !== 'LOAD_ANIMATION' || !event.data) return {};
       const sn = coerceSnippet(event.data, false);
+      // Replace existing snippet with same name instead of adding duplicate
+      const existingIdx = context.animations.findIndex((s) => s?.name === sn.name);
+      if (existingIdx >= 0) {
+        const animations = context.animations.slice();
+        animations[existingIdx] = sn;
+        return { animations };
+      }
       return { animations: [...context.animations, sn] };
     }),
 
@@ -223,16 +238,6 @@ export const animationMachine = createMachine({
       });
 
       return { currentAUs, currentVisemes, scheduledTransitions: ids };
-    }),
-
-    updateCurrentTimes: assign(({ context }) => {
-      const now = Date.now();
-      const animations = context.animations.map((sn) => {
-        if (!sn.isPlaying || !sn.startWallTime) return sn;
-        const currentTime = ((now - sn.startWallTime) / 1000) * (sn.snippetPlaybackRate || 1);
-        return { ...sn, currentTime };
-      });
-      return { animations };
     }),
 
     seekSnippet: assign(({ context, event }) => {

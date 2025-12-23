@@ -216,15 +216,15 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
   }, [valueMin, valueMax]);
 
   return (
-    <VStack align="stretch" spacing={1}>
+    <VStack align="stretch" gap={1}>
       {label && (
-        <HStack mb={1} spacing={2} justify="space-between" w="100%">
-          <HStack spacing={2}>
+        <HStack mb={1} gap={2} justify="space-between" w="100%">
+          <HStack gap={2}>
             <Text fontWeight="bold" fontSize="md" color="gray.50">{label}</Text>
             <Text fontSize="xs" color="gray.400">AU {auId}</Text>
           </HStack>
           {isPlaying && (
-            <HStack spacing={1}>
+            <HStack gap={1}>
               <Box w={2} h={2} borderRadius="full" bg="green.400" />
               <Text fontSize="xs" color="green.400" fontWeight="bold">Playing</Text>
             </HStack>

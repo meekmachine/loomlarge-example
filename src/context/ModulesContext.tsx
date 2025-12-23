@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useMemo } from 'react';
 import type { EyeHeadTrackingService } from '../latticework/eyeHeadTracking/eyeHeadTrackingService';
 
 interface ModulesContextType {
@@ -31,7 +31,7 @@ export const ModulesProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [eyeHeadTrackingService, setEyeHeadTrackingService] = useState<EyeHeadTrackingService | null>(null);
 
-  const value: ModulesContextType = {
+  const value = useMemo<ModulesContextType>(() => ({
     isTalking,
     setIsTalking,
     isListening,
@@ -42,7 +42,7 @@ export const ModulesProvider: React.FC<{ children: ReactNode }> = ({ children })
     setSpeakingText,
     eyeHeadTrackingService,
     setEyeHeadTrackingService,
-  };
+  }), [isTalking, isListening, transcribedText, speakingText, eyeHeadTrackingService]);
 
   return (
     <ModulesContext.Provider value={value}>

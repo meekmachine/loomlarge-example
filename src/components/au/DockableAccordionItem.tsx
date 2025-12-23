@@ -5,10 +5,10 @@ import {
   Portal,
   IconButton,
   Text,
-  Collapse
+  Collapsible,
 } from '@chakra-ui/react';
 import Draggable from 'react-draggable';
-import { CloseIcon, DragHandleIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons';
+import { X, GripVertical, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface DockableAccordionItemProps {
   title: string;
@@ -79,8 +79,8 @@ function DockableAccordionItem({
           </Box>
 
           <HStack
-            spacing={2}
-            _hover={{ '.drag-trigger': { opacity: 1, visibility: 'visible' } }}
+            gap={2}
+            css={{ '&:hover .drag-trigger': { opacity: 1, visibility: 'visible' } }}
           >
             <Box
               className="drag-trigger"
@@ -100,21 +100,23 @@ function DockableAccordionItem({
                 setIsDocked(false);
               }}
             >
-              <DragHandleIcon boxSize={4} />
+              <GripVertical size={16} />
             </Box>
 
             {isExpanded ? (
-              <ChevronDownIcon color="gray.400" boxSize={5} />
+              <ChevronDown size={20} color="gray" />
             ) : (
-              <ChevronRightIcon color="gray.400" boxSize={5} />
+              <ChevronRight size={20} color="gray" />
             )}
           </HStack>
         </Box>
-        <Collapse in={isExpanded} animateOpacity>
-          <Box pb={4} pt={4} px={4} bg="gray.800">
-            {children}
-          </Box>
-        </Collapse>
+        <Collapsible.Root open={isExpanded}>
+          <Collapsible.Content>
+            <Box pb={4} pt={4} px={4} bg="gray.800">
+              {children}
+            </Box>
+          </Collapsible.Content>
+        </Collapsible.Root>
       </Box>
     );
   }
@@ -145,7 +147,7 @@ function DockableAccordionItem({
           borderColor="brand.500"
           borderRadius="lg"
           boxShadow="dark-lg"
-          sx={{ resize: 'both', overflow: 'auto' }}
+          css={{ resize: 'both', overflow: 'auto' }}
           onClick={bringToFront}
           transition="border-color 0.2s, box-shadow 0.2s"
           _hover={{
@@ -169,12 +171,13 @@ function DockableAccordionItem({
             <IconButton
               size="xs"
               aria-label="Dock item"
-              icon={<CloseIcon />}
               onClick={() => setIsDocked(true)}
-              colorScheme="gray"
+              colorPalette="gray"
               variant="ghost"
               _hover={{ bg: 'gray.600' }}
-            />
+            >
+              <X size={12} />
+            </IconButton>
           </Box>
 
           <Box p={4} color="gray.50">

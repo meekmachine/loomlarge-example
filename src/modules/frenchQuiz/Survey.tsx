@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Flex, Icon, Text, Tooltip } from '@chakra-ui/react';
-import { StarIcon } from '@chakra-ui/icons';
+import { Flex, Box, Text, Tooltip } from '@chakra-ui/react';
+import { Star } from 'lucide-react';
 
 interface Question {
   id: number;
@@ -53,28 +53,35 @@ export default function Survey({
       'Strongly Agree',
     ];
     const rating = responses[questions[currentQuestionIndex].id]?.rating || 0;
-    return labels.map((label, index) => (
-      <Tooltip label={label} key={index} hasArrow placement="top">
-        <Icon
-          as={StarIcon}
-          boxSize={10}
-          m={1}
-          color={
-            index <= (hoverIndex >= 0 ? hoverIndex : rating - 1)
-              ? 'orange.400'
-              : 'gray.300'
-          }
-          onClick={() => handleResponse(index + 1)}
-          onMouseEnter={() => setHoverIndex(index)}
-          onMouseLeave={() => setHoverIndex(-1)}
-          _hover={{
-            color: 'orange.600',
-            cursor: 'pointer',
-            transform: 'scale(1.1)',
-            transition: 'transform 0.2s ease-in-out',
-          }}
-        />
-      </Tooltip>
+    return labels.map((label, starIndex) => (
+      <Tooltip.Root key={starIndex}>
+        <Tooltip.Trigger asChild>
+          <Box
+            as="span"
+            display="inline-flex"
+            m={1}
+            color={
+              starIndex <= (hoverIndex >= 0 ? hoverIndex : rating - 1)
+                ? 'orange.400'
+                : 'gray.300'
+            }
+            onClick={() => handleResponse(starIndex + 1)}
+            onMouseEnter={() => setHoverIndex(starIndex)}
+            onMouseLeave={() => setHoverIndex(-1)}
+            cursor="pointer"
+            _hover={{
+              color: 'orange.600',
+              transform: 'scale(1.1)',
+              transition: 'transform 0.2s ease-in-out',
+            }}
+          >
+            <Star size={40} fill="currentColor" />
+          </Box>
+        </Tooltip.Trigger>
+        <Tooltip.Positioner>
+          <Tooltip.Content>{label}</Tooltip.Content>
+        </Tooltip.Positioner>
+      </Tooltip.Root>
     ));
   };
 

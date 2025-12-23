@@ -1,5 +1,3 @@
-import { UseToastOptions } from '@chakra-ui/react';
-
 export interface ModuleSettings {
   [key: string]: any;
 }
@@ -20,7 +18,7 @@ export interface ModuleInstance {
     animationManager: any,
     settings: ModuleSettings,
     containerRef: React.RefObject<HTMLDivElement>,
-    toast: (options: UseToastOptions) => void
+    toast: any
   ) => void;
   stop: (animationManager: any) => void;
 }

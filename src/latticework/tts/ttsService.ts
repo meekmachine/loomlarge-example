@@ -19,7 +19,7 @@ import {
   decodeBase64Audio,
   getTimelineDuration
 } from './utils';
-import { getJawAmountForViseme, getARKitVisemeIndex } from '../lipsync/visemeToARKit';
+import { getARKitVisemeIndex } from '../lipsync/visemeToARKit';
 
 export class TTSService {
   private config: Required<TTSConfig>;
@@ -393,6 +393,13 @@ export class TTSService {
 
   /**
    * Handle word boundary - coordinates LipSync and Prosodic agencies
+   *
+   * ARCHITECTURE NOTE: Viseme curves use numeric indices (0-14) as curve IDs.
+   * The AnimationScheduler detects these as viseme indices and routes them to
+   * engine.transitionViseme(), which handles BOTH the morph target AND jaw bone
+   * rotation internally. Do NOT add separate AU 26 (jaw drop) curves here -
+   * that would cause double jaw movement since transitionViseme() already
+   * coordinates jaw via getVisemeJawAmount() and applyJawBoneRotation().
    */
   private handleWordBoundary(word: string): void {
     if (!this.config.animationManager) {
@@ -400,12 +407,11 @@ export class TTSService {
     }
 
     // === LIPSYNC AGENCY ===
-    // Extract visemes and create combined viseme + jaw animation
+    // Extract visemes and create viseme animation curves (jaw handled by engine)
     if (this.config.lipSyncService) {
       const visemeTimeline = this.config.lipSyncService.extractVisemeTimeline(word);
       const combinedCurves: Record<string, Array<{ time: number; intensity: number }>> = {};
       const lipsyncIntensity = 1.0;
-      const jawActivation = 1.5;
 
       visemeTimeline.forEach((visemeEvent: any) => {
         const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
@@ -413,51 +419,38 @@ export class TTSService {
         const timeInSec = visemeEvent.offsetMs / 1000;
         const durationInSec = visemeEvent.durationMs / 1000;
 
-        const anticipation = durationInSec * 0.1;
-        const attack = durationInSec * 0.25;
-        const sustain = durationInSec * 0.45;
+        // Skip silence visemes (SAPI 0)
+        if (visemeEvent.visemeId === 0) return;
+
+        // Smooth coarticulation timing
+        const rampUp = Math.max(0.025, durationInSec * 0.3);
+        const rampDown = Math.max(0.030, durationInSec * 0.35);
+        const peakEnd = timeInSec + durationInSec - rampDown;
 
         if (!combinedCurves[visemeId]) {
           combinedCurves[visemeId] = [];
         }
 
+        // Check for overlap with previous keyframe of same viseme
         const lastKeyframe = combinedCurves[visemeId][combinedCurves[visemeId].length - 1];
-        const startIntensity = (lastKeyframe && lastKeyframe.time > timeInSec - 0.02)
-          ? lastKeyframe.intensity
-          : 0;
-
-        combinedCurves[visemeId].push(
-          { time: timeInSec, intensity: startIntensity },
-          { time: timeInSec + anticipation, intensity: 30 * lipsyncIntensity },
-          { time: timeInSec + attack, intensity: 95 * lipsyncIntensity },
-          { time: timeInSec + sustain, intensity: 100 * lipsyncIntensity },
-          { time: timeInSec + durationInSec, intensity: 0 }
-        );
-
-        // Jaw coordination
-        const jawAmount = getJawAmountForViseme(visemeEvent.visemeId);
-        if (jawAmount > 0.05) {
-          if (!combinedCurves['26']) {
-            combinedCurves['26'] = [];
-          }
-
-          const jawAnticipation = durationInSec * 0.15;
-          const jawAttack = durationInSec * 0.3;
-          const jawSustain = durationInSec * 0.4;
-
-          const lastJawKeyframe = combinedCurves['26'][combinedCurves['26'].length - 1];
-          const startJawIntensity = (lastJawKeyframe && lastJawKeyframe.time > timeInSec - 0.02)
-            ? lastJawKeyframe.intensity
-            : 0;
-
-          combinedCurves['26'].push(
-            { time: timeInSec, intensity: startJawIntensity },
-            { time: timeInSec + jawAnticipation, intensity: jawAmount * 20 * jawActivation },
-            { time: timeInSec + jawAttack, intensity: jawAmount * 90 * jawActivation },
-            { time: timeInSec + jawSustain, intensity: jawAmount * 100 * jawActivation },
+        if (lastKeyframe && lastKeyframe.time > timeInSec - 0.02) {
+          // Extend the previous viseme instead of starting fresh
+          combinedCurves[visemeId].push(
+            { time: peakEnd, intensity: 100 * lipsyncIntensity },
+            { time: timeInSec + durationInSec, intensity: 0 }
+          );
+        } else {
+          // Normal envelope with smooth ramps
+          combinedCurves[visemeId].push(
+            { time: timeInSec, intensity: 0 },
+            { time: timeInSec + rampUp, intensity: 100 * lipsyncIntensity },
+            { time: peakEnd, intensity: 100 * lipsyncIntensity },
             { time: timeInSec + durationInSec, intensity: 0 }
           );
         }
+
+        // NOTE: Jaw coordination is handled by transitionViseme() in the engine
+        // Do NOT add AU 26 curves here - that causes double jaw movement
       });
 
       const lastVisemeEndTime = visemeTimeline.length > 0

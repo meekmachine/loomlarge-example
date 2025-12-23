@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { ChakraProvider } from '@chakra-ui/react';
+import { ChakraProvider, defaultSystem } from '@chakra-ui/react';
 import AIChatApp from './AIChatApp';
 import { ModuleSettings } from '../../types/modules';
 import { ModulesProvider } from '../../context/ModulesContext';
@@ -31,7 +31,7 @@ export function start(
 
   // Render the AI Chat app
   root.render(
-    <ChakraProvider>
+    <ChakraProvider value={defaultSystem}>
       <ModulesProvider>
         <AIChatApp
           animationManager={animationManager}

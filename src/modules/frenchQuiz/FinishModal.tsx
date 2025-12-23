@@ -1,13 +1,9 @@
 import React from 'react';
 import {
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalFooter,
-  ModalBody,
-  ModalCloseButton,
+  Dialog,
   Button,
+  CloseButton,
+  Portal,
   Text,
 } from '@chakra-ui/react';
 
@@ -18,23 +14,29 @@ interface FinishModalProps {
 
 export default function FinishModal({ isOpen, onClose }: FinishModalProps) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>Quiz Complete!</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
-          <Text>
-            Thank you for completing the Savoir-Faire Quiz! Your responses have
-            been recorded.
-          </Text>
-        </ModalBody>
-        <ModalFooter>
-          <Button colorScheme="green" onClick={onClose}>
-            Finish
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+    <Dialog.Root open={isOpen} onOpenChange={(details) => !details.open && onClose()}>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content>
+            <Dialog.Header>Quiz Complete!</Dialog.Header>
+            <Dialog.CloseTrigger asChild>
+              <CloseButton position="absolute" top={2} right={2} />
+            </Dialog.CloseTrigger>
+            <Dialog.Body>
+              <Text>
+                Thank you for completing the Savoir-Faire Quiz! Your responses have
+                been recorded.
+              </Text>
+            </Dialog.Body>
+            <Dialog.Footer>
+              <Button colorPalette="green" onClick={onClose}>
+                Finish
+              </Button>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
   );
 }

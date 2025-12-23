@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import {
   Box,
   Button,
@@ -8,19 +8,13 @@ import {
   Tooltip,
   Flex,
   Accordion,
-  AccordionItem,
-  AccordionButton,
-  AccordionPanel,
-  AccordionIcon,
   Alert,
-  AlertIcon,
-  useToast,
   Input,
-  FormControl,
-  FormLabel,
+  Field,
   VStack,
 } from '@chakra-ui/react';
-import { InfoIcon, ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons';
+import { Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { toaster } from './ui/toaster';
 import modulesConfig from '../modules/config';
 import { Module, ModuleSettings, ModuleInstance } from '../types/modules';
 
@@ -28,14 +22,13 @@ interface ModulesMenuProps {
   animationManager?: any;
 }
 
-export default function ModulesMenu({ animationManager }: ModulesMenuProps) {
+function ModulesMenu({ animationManager }: ModulesMenuProps) {
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [moduleSettings, setModuleSettings] = useState<Record<string, ModuleSettings>>({});
   const [activeModules, setActiveModules] = useState<Record<string, boolean>>({});
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [error, setError] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
-  const toast = useToast();
 
   // Load settings from localStorage or use default from config
   useEffect(() => {
@@ -72,7 +65,7 @@ export default function ModulesMenu({ animationManager }: ModulesMenuProps) {
           animationManager,
           moduleSettings[module.name],
           containerRef,
-          toast
+          toaster
         );
 
         setActiveModules((prev) => ({ ...prev, [module.name]: true }));
@@ -83,11 +76,9 @@ export default function ModulesMenu({ animationManager }: ModulesMenuProps) {
     } catch (err: any) {
       console.error(`Failed to load the module: ${module.name}`, err);
       setError(`Failed to load the module: ${module.name}`);
-      toast({
+      toaster.error({
         title: 'Module Error',
         description: `Failed to load ${module.name}`,
-        status: 'error',
-        duration: 3000,
       });
     }
   };
@@ -115,51 +106,64 @@ export default function ModulesMenu({ animationManager }: ModulesMenuProps) {
             Modules
           </Text>
           <IconButton
-            icon={isMenuOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
             onClick={toggleMenu}
             variant="outline"
             size="sm"
             aria-label="Toggle modules menu"
-            colorScheme="brand"
+            colorPalette="brand"
             color="gray.400"
             _hover={{ color: 'gray.200', bg: 'gray.700' }}
-          />
+          >
+            {isMenuOpen ? <ChevronUp /> : <ChevronDown />}
+          </IconButton>
         </Flex>
 
         {error && isMenuOpen && (
-          <Alert status="error" mb={4}>
-            <AlertIcon />
-            {error}
-          </Alert>
+          <Alert.Root status="error" mb={4}>
+            <Alert.Indicator />
+            <Alert.Content>{error}</Alert.Content>
+          </Alert.Root>
         )}
 
         {isMenuOpen && (
-          <Accordion allowMultiple>
+          <Accordion.Root multiple>
             {modulesConfig.modules.map((module, index) => (
-              <AccordionItem key={index} borderColor="gray.700">
-                <AccordionButton bg="gray.800" _hover={{ bg: 'gray.700' }}>
+              <Accordion.Item key={index} value={module.name} borderColor="gray.700">
+                <Accordion.ItemTrigger bg="gray.800" _hover={{ bg: 'gray.700' }}>
                   <Box flex="1" textAlign="left" color="gray.50">
                     {module.name}
                   </Box>
-                  <AccordionIcon color="gray.400" />
-                </AccordionButton>
-                <AccordionPanel pb={4} bg="gray.800">
-                  <VStack align="stretch" spacing={3}>
+                  <Accordion.ItemIndicator color="gray.400" />
+                </Accordion.ItemTrigger>
+                <Accordion.ItemContent pb={4} bg="gray.800">
+                  <VStack align="stretch" gap={3}>
                     <Flex align="center" justify="space-between">
-                      <Tooltip label={module.description} placement="top">
-                        <InfoIcon color="gray.400" />
-                      </Tooltip>
-                      <Switch
-                        isChecked={activeModules[module.name] || false}
-                        onChange={(e) => handleSwitchChange(module, e.target.checked)}
-                        colorScheme="brand"
-                      />
+                      <Tooltip.Root>
+                        <Tooltip.Trigger asChild>
+                          <Box as="span" cursor="pointer">
+                            <Info size={16} color="gray" />
+                          </Box>
+                        </Tooltip.Trigger>
+                        <Tooltip.Positioner>
+                          <Tooltip.Content>{module.description}</Tooltip.Content>
+                        </Tooltip.Positioner>
+                      </Tooltip.Root>
+                      <Switch.Root
+                        checked={activeModules[module.name] || false}
+                        onCheckedChange={(details) => handleSwitchChange(module, details.checked)}
+                        colorPalette="brand"
+                      >
+                        <Switch.HiddenInput />
+                        <Switch.Control>
+                          <Switch.Thumb />
+                        </Switch.Control>
+                      </Switch.Root>
                     </Flex>
 
                     {/* Settings for AI Chat module */}
                     {module.name === 'AI Chat' && (
-                      <FormControl>
-                        <FormLabel fontSize="sm" color="gray.300">Anthropic API Key</FormLabel>
+                      <Field.Root>
+                        <Field.Label fontSize="sm" color="gray.300">Anthropic API Key</Field.Label>
                         <Input
                           type="password"
                           placeholder="sk-ant-..."
@@ -195,13 +199,13 @@ export default function ModulesMenu({ animationManager }: ModulesMenuProps) {
                             console.anthropic.com
                           </a>
                         </Text>
-                      </FormControl>
+                      </Field.Root>
                     )}
                   </VStack>
-                </AccordionPanel>
-              </AccordionItem>
+                </Accordion.ItemContent>
+              </Accordion.Item>
             ))}
-          </Accordion>
+          </Accordion.Root>
         )}
       </Box>
 
@@ -209,3 +213,5 @@ export default function ModulesMenu({ animationManager }: ModulesMenuProps) {
     </>
   );
 }
+
+export default memo(ModulesMenu);

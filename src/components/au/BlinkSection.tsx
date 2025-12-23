@@ -1,49 +1,66 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState, memo, useRef } from 'react';
 import {
   VStack,
   HStack,
   Text,
   Slider,
-  SliderTrack,
-  SliderFilledTrack,
-  SliderThumb,
   Box,
   Switch,
   Button,
 } from '@chakra-ui/react';
 import { BlinkService } from '../../latticework/blink/blinkService';
 import { BlinkState } from '../../latticework/blink/types';
+import { useThreeState } from '../../context/threeContext';
 import DockableAccordionItem from './DockableAccordionItem';
 
 interface BlinkSectionProps {
-  blinkService: BlinkService | null;
   disabled?: boolean;
   defaultExpanded?: boolean;
 }
 
-export default function BlinkSection({ blinkService, disabled = false, defaultExpanded = false }: BlinkSectionProps) {
+function BlinkSection({ disabled = false, defaultExpanded = false }: BlinkSectionProps) {
+  const { anim } = useThreeState();
+  const blinkServiceRef = useRef<BlinkService | null>(null);
   const [state, setState] = useState<BlinkState | null>(null);
 
+  // Create and manage BlinkService lifecycle
   useEffect(() => {
-    if (!blinkService) return;
+    if (!anim) return;
+
+    // Create service if not exists
+    if (!blinkServiceRef.current) {
+      blinkServiceRef.current = new BlinkService({
+        scheduleSnippet: (snippet: any) => anim.schedule?.(snippet) || null,
+        removeSnippet: (name: string) => anim.remove?.(name),
+      });
+    }
+
+    const service = blinkServiceRef.current;
 
     // Get initial state
-    setState(blinkService.getState());
+    setState(service.getState());
 
     // Subscribe to updates
-    const unsubscribe = blinkService.subscribe((newState) => {
+    const unsubscribe = service.subscribe((newState) => {
       setState(newState);
     });
 
-    return unsubscribe;
-  }, [blinkService]);
+    return () => {
+      unsubscribe();
+      // Dispose service on unmount
+      service.dispose();
+      blinkServiceRef.current = null;
+    };
+  }, [anim]);
+
+  const blinkService = blinkServiceRef.current;
 
   if (!blinkService || !state) {
     return (
       <DockableAccordionItem title="Blinking" isDefaultExpanded={defaultExpanded}>
         <Box p={2}>
           <Text fontSize="sm" color="gray.400">
-            No blink service available
+            Waiting for animation service...
           </Text>
         </Box>
       </DockableAccordionItem>
@@ -51,28 +68,28 @@ export default function BlinkSection({ blinkService, disabled = false, defaultEx
   }
 
   // Control handlers
-  const handleToggle = (checked: boolean) => {
-    if (checked) {
+  const handleToggle = (details: { checked: boolean }) => {
+    if (details.checked) {
       blinkService.enable();
     } else {
       blinkService.disable();
     }
   };
 
-  const handleFrequencyChange = (frequency: number) => {
-    blinkService.setFrequency(frequency);
+  const handleFrequencyChange = (details: { value: number[] }) => {
+    blinkService.setFrequency(details.value[0]);
   };
 
-  const handleDurationChange = (duration: number) => {
-    blinkService.setDuration(duration);
+  const handleDurationChange = (details: { value: number[] }) => {
+    blinkService.setDuration(details.value[0]);
   };
 
-  const handleIntensityChange = (intensity: number) => {
-    blinkService.setIntensity(intensity);
+  const handleIntensityChange = (details: { value: number[] }) => {
+    blinkService.setIntensity(details.value[0]);
   };
 
-  const handleRandomnessChange = (randomness: number) => {
-    blinkService.setRandomness(randomness);
+  const handleRandomnessChange = (details: { value: number[] }) => {
+    blinkService.setRandomness(details.value[0]);
   };
 
   const handleManualBlink = () => {
@@ -85,131 +102,140 @@ export default function BlinkSection({ blinkService, disabled = false, defaultEx
 
   return (
     <DockableAccordionItem title="Blinking" isDefaultExpanded={defaultExpanded}>
-      <VStack spacing={4} align="stretch" p={2}>
+      <VStack gap={4} align="stretch" p={2}>
         {/* Enable/Disable Toggle */}
         <HStack justify="space-between">
           <Text fontSize="sm" color="gray.50" fontWeight="semibold">
             Automatic Blinking
           </Text>
-          <Switch
-            isChecked={state.enabled}
-            onChange={(e) => handleToggle(e.target.checked)}
-            isDisabled={disabled}
+          <Switch.Root
+            checked={state.enabled}
+            onCheckedChange={handleToggle}
+            disabled={disabled}
             size="md"
-            colorScheme="brand"
-          />
+            colorPalette="brand"
+          >
+            <Switch.HiddenInput />
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+          </Switch.Root>
         </HStack>
 
         {/* Manual Blink Button */}
         <Button
           size="sm"
-          colorScheme="blue"
+          colorPalette="blue"
           onClick={handleManualBlink}
-          isDisabled={disabled}
+          disabled={disabled}
         >
           Trigger Blink Now
         </Button>
 
         {/* Frequency Slider */}
-        <VStack align="stretch" spacing={1}>
+        <VStack align="stretch" gap={1}>
           <HStack justify="space-between">
             <Text fontSize="xs" color="gray.50">Frequency (blinks/min)</Text>
             <Text fontSize="xs" color="gray.300">
               {state.frequency.toFixed(0)}
             </Text>
           </HStack>
-          <Slider
-            value={state.frequency}
-            onChange={handleFrequencyChange}
+          <Slider.Root
+            value={[state.frequency]}
+            onValueChange={handleFrequencyChange}
             min={0}
             max={60}
             step={1}
-            isDisabled={disabled || !state.enabled}
-            colorScheme="brand"
+            disabled={disabled || !state.enabled}
           >
-            <SliderTrack>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
           <Text fontSize="xs" color="gray.500" fontStyle="italic">
             Typical: 15-20 blinks/min
           </Text>
         </VStack>
 
         {/* Duration Slider */}
-        <VStack align="stretch" spacing={1}>
+        <VStack align="stretch" gap={1}>
           <HStack justify="space-between">
             <Text fontSize="xs" color="gray.50">Duration (seconds)</Text>
             <Text fontSize="xs" color="gray.300">
               {state.duration.toFixed(2)}s
             </Text>
           </HStack>
-          <Slider
-            value={state.duration}
-            onChange={handleDurationChange}
+          <Slider.Root
+            value={[state.duration]}
+            onValueChange={handleDurationChange}
             min={0.05}
             max={1.0}
             step={0.01}
-            isDisabled={disabled}
-            colorScheme="brand"
+            disabled={disabled}
           >
-            <SliderTrack>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
           <Text fontSize="xs" color="gray.500" fontStyle="italic">
             Typical: 0.1-0.3 seconds
           </Text>
         </VStack>
 
         {/* Intensity Slider */}
-        <VStack align="stretch" spacing={1}>
+        <VStack align="stretch" gap={1}>
           <HStack justify="space-between">
             <Text fontSize="xs" color="gray.50">Intensity</Text>
             <Text fontSize="xs" color="gray.300">
               {(state.intensity * 100).toFixed(0)}%
             </Text>
           </HStack>
-          <Slider
-            value={state.intensity}
-            onChange={handleIntensityChange}
+          <Slider.Root
+            value={[state.intensity]}
+            onValueChange={handleIntensityChange}
             min={0}
             max={1}
             step={0.01}
-            isDisabled={disabled}
-            colorScheme="brand"
+            disabled={disabled}
           >
-            <SliderTrack>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
         </VStack>
 
         {/* Randomness Slider */}
-        <VStack align="stretch" spacing={1}>
+        <VStack align="stretch" gap={1}>
           <HStack justify="space-between">
             <Text fontSize="xs" color="gray.50">Randomness</Text>
             <Text fontSize="xs" color="gray.300">
               {(state.randomness * 100).toFixed(0)}%
             </Text>
           </HStack>
-          <Slider
-            value={state.randomness}
-            onChange={handleRandomnessChange}
+          <Slider.Root
+            value={[state.randomness]}
+            onValueChange={handleRandomnessChange}
             min={0}
             max={1}
             step={0.01}
-            isDisabled={disabled}
-            colorScheme="brand"
+            disabled={disabled}
           >
-            <SliderTrack>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
           <Text fontSize="xs" color="gray.500" fontStyle="italic">
             Adds natural variation to timing and intensity
           </Text>
@@ -218,9 +244,9 @@ export default function BlinkSection({ blinkService, disabled = false, defaultEx
         {/* Reset Button */}
         <Button
           size="sm"
-          colorScheme="orange"
+          colorPalette="orange"
           onClick={handleReset}
-          isDisabled={disabled}
+          disabled={disabled}
           mt={2}
         >
           Reset to Default
@@ -229,3 +255,5 @@ export default function BlinkSection({ blinkService, disabled = false, defaultEx
     </DockableAccordionItem>
   );
 }
+
+export default memo(BlinkSection);

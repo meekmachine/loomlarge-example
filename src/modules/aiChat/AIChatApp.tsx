@@ -9,11 +9,9 @@ import {
   Tooltip,
   Badge,
   Textarea,
-  FormControl,
-  FormLabel,
-  AspectRatio,
+  Field,
 } from '@chakra-ui/react';
-import { PhoneIcon } from '@chakra-ui/icons';
+import { Phone } from 'lucide-react';
 import { ModuleSettings } from '../../types/modules';
 import { createTTSService } from '../../latticework/tts';
 import { createTranscriptionService } from '../../latticework/transcription';
@@ -683,16 +681,16 @@ Keep conversations fun, engaging, and emotionally authentic!`;
       minWidth="360px"
       zIndex={1000}
     >
-      <VStack spacing={3} align="stretch">
+      <VStack gap={3} align="stretch">
         <HStack justify="space-between">
           <Text fontSize="md" fontWeight="bold">AI Chat</Text>
-          <Badge colorScheme={isConnected ? 'green' : 'red'}>
+          <Badge colorPalette={isConnected ? 'green' : 'red'}>
             {isConnected ? 'Connected' : 'Disconnected'}
           </Badge>
         </HStack>
 
         {!isConnected && (
-          <VStack spacing={2} align="stretch">
+          <VStack gap={2} align="stretch">
             <Text fontSize="sm" color="gray.600">Enter your Anthropic API key:</Text>
             <Input
               type="password"
@@ -704,11 +702,12 @@ Keep conversations fun, engaging, and emotionally authentic!`;
             />
             <IconButton
               aria-label="Connect"
-              icon={<Text fontSize="sm">Connect</Text>}
               onClick={handleApiKeySubmit}
-              colorScheme="blue"
+              colorPalette="blue"
               size="sm"
-            />
+            >
+              <Text fontSize="sm">Connect</Text>
+            </IconButton>
           </VStack>
         )}
 
@@ -723,30 +722,33 @@ Keep conversations fun, engaging, and emotionally authentic!`;
 
             <Box
               animation={conversationState === 'userSpeaking' ? 'pulse 1.5s ease-in-out infinite' : undefined}
-              sx={{
+              css={{
                 '@keyframes pulse': {
                   '0%, 100%': { transform: 'scale(1)', opacity: 1 },
                   '50%': { transform: 'scale(1.1)', opacity: 0.8 },
                 },
               }}
             >
-              <Tooltip
-                label={
-                  conversationState === 'userSpeaking'
-                    ? 'Listening... Click to stop'
-                    : 'Click to talk'
-                }
-                placement="top"
-              >
-                <IconButton
-                  aria-label={conversationState === 'userSpeaking' ? 'Stop listening' : 'Start talking'}
-                  icon={<PhoneIcon />}
-                  isRound
-                  size="lg"
-                  colorScheme={conversationState === 'userSpeaking' ? 'green' : 'gray'}
-                  onClick={conversationState === 'userSpeaking' ? stopListening : startConversation}
-                />
-              </Tooltip>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <IconButton
+                    aria-label={conversationState === 'userSpeaking' ? 'Stop listening' : 'Start talking'}
+                    rounded="full"
+                    size="lg"
+                    colorPalette={conversationState === 'userSpeaking' ? 'green' : 'gray'}
+                    onClick={conversationState === 'userSpeaking' ? stopListening : startConversation}
+                  >
+                    <Phone />
+                  </IconButton>
+                </Tooltip.Trigger>
+                <Tooltip.Positioner>
+                  <Tooltip.Content>
+                    {conversationState === 'userSpeaking'
+                      ? 'Listening... Click to stop'
+                      : 'Click to talk'}
+                  </Tooltip.Content>
+                </Tooltip.Positioner>
+              </Tooltip.Root>
             </Box>
           </>
         )}

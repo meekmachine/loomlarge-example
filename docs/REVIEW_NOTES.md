@@ -17,11 +17,10 @@ Collected notes from inspecting the top-level boot, engine context, and GLB scen
 ## Scene Setup (GLB)
 - `src/scenes/CharacterGLBScene.tsx`:
   - Builds a full Three.js pipeline (renderer, camera, controls, lights, optional skybox).
-  - Loads GLB via `GLTFLoader` + `DRACOLoader` with `GLBCacheManager` (blob caching). Fallbacks to direct load if caching fails.
-  - Inventories model objects (meshes, bones, groups) and logs them.
-  - Auto-detects hair via `classifyHairObject` and initializes `HairService(engine)` when found; registers hair objects and logs morph targets.
-  - Centers/scales the model, frames camera/controls, collects morph-target meshes, and calls `onReady` with `{ scene, model, meshes, animations, hairService }`.
-  - Manages loading text overlay, resize handling, autorotate, and cleanup (RAF, listeners, renderer, Draco decoder).
+  - Loads GLB directly via `GLTFLoader` + `DRACOLoader` (no custom caching layer - browser cache handles this; future enhancement: service worker in index.html for offline/preload).
+  - Uses refs for `onReady`/`onProgress` callbacks to prevent effect re-runs when callback identity changes.
+  - Centers/scales the model, collects morph-target meshes, and calls `onReady` with `{ scene, renderer, model, meshes, animations, skyboxTexture }`.
+  - Manages visibility (hidden until ready), resize handling, autorotate, and cleanup (RAF, listeners, renderer, Draco decoder).
   - No agency logic here—pure scene + asset load; agencies consume the `onReady` payload elsewhere.
 
 ## Immediate Gaps / Next Areas to Review

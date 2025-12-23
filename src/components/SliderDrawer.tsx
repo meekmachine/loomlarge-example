@@ -1,19 +1,16 @@
-import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useMemo, useCallback, memo, useRef, useEffect } from 'react';
 import {
   Drawer,
-  DrawerBody,
-  DrawerContent,
-  DrawerCloseButton,
   VStack,
   Box,
-  IconButton,
   Accordion,
   Button,
   HStack,
   Switch,
   Text,
-  Tooltip,
+  CloseButton,
 } from '@chakra-ui/react';
+import { useSelector } from '@xstate/react';
 import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe } from 'react-icons/fa';
 import { AU_INFO, AUInfo } from '../engine/arkit/shapeDict';
 import AUSection from './au/AUSection';
@@ -28,9 +25,89 @@ import MeshPanel from './au/MeshPanel';
 import SkyboxSection from './au/SkyboxSection';
 import { useThreeState } from '../context/threeContext';
 import type { NormalizedSnippet, CurvePoint } from '../latticework/animation/types';
-import { HairService } from '../latticework/hair/hairService';
-import { BlinkService } from '../latticework/blink/blinkService';
 import { EngineThree } from '../engine/EngineThree';
+
+// Stable empty array reference - MUST be outside component to prevent re-renders
+const EMPTY_SNIPPETS: NormalizedSnippet[] = [];
+
+// CSS styles for tabs and tooltips - avoids React component overhead
+const tabStyles = `
+  .slider-drawer-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 1.25rem;
+    transition: all 0.2s;
+    background: transparent;
+    color: #A0AEC0;
+    position: relative;
+  }
+  .slider-drawer-tab:hover {
+    background: #2D3748;
+    color: white;
+    transform: scale(1.1);
+  }
+  .slider-drawer-tab.active {
+    background: var(--chakra-colors-brand-500, #3182CE);
+    color: white;
+  }
+  .slider-drawer-tab.active:hover {
+    background: var(--chakra-colors-brand-400, #4299E1);
+  }
+  .slider-drawer-tab::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 100%;
+    margin-left: 8px;
+    padding: 4px 8px;
+    background: #1A202C;
+    color: white;
+    font-size: 12px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 10000;
+  }
+  .slider-drawer-tab:hover::after {
+    opacity: 1;
+  }
+  .slider-drawer-menu-btn {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 1400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 1.25rem;
+    background: var(--chakra-colors-brand-500, #3182CE);
+    color: white;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transition: all 0.2s;
+  }
+  .slider-drawer-menu-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  }
+  .tab-panel {
+    display: none;
+  }
+  .tab-panel.active {
+    display: block;
+  }
+`;
 
 // Tab definitions
 type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
@@ -57,8 +134,6 @@ interface SliderDrawerProps {
   isOpen: boolean;
   onToggle: () => void;
   disabled?: boolean;
-  hairService?: HairService | null;
-  blinkService?: BlinkService | null;
 }
 
 type Keyframe = { time: number; value: number };
@@ -77,76 +152,79 @@ function curvePointsToKeyframes(points: CurvePoint[]): Keyframe[] {
   }));
 }
 
-// Memoized tab button with stable onClick
-const TabButton = memo(({
-  tabId,
-  icon: Icon,
-  label,
-  isActive,
-  onTabClick
-}: {
-  tabId: TabId;
-  icon: React.ElementType;
-  label: string;
-  isActive: boolean;
-  onTabClick: (id: TabId) => void;
-}) => {
-  const handleClick = useCallback(() => {
-    onTabClick(tabId);
-  }, [tabId, onTabClick]);
+// Inject styles once
+let stylesInjected = false;
+function injectStyles() {
+  if (stylesInjected || typeof document === 'undefined') return;
+  const style = document.createElement('style');
+  style.textContent = tabStyles;
+  document.head.appendChild(style);
+  stylesInjected = true;
+}
 
-  return (
-    <Tooltip label={label} placement="right" hasArrow>
-      <IconButton
-        aria-label={label}
-        icon={<Icon />}
-        onClick={handleClick}
-        variant={isActive ? 'solid' : 'ghost'}
-        colorScheme={isActive ? 'brand' : 'gray'}
-        size="lg"
-        fontSize="xl"
-        color={isActive ? 'white' : 'gray.300'}
-        bg={isActive ? 'brand.500' : 'transparent'}
-        _hover={{
-          bg: isActive ? 'brand.400' : 'gray.700',
-          color: 'white',
-          transform: 'scale(1.1)',
-        }}
-        transition="all 0.2s"
-      />
-    </Tooltip>
-  );
-});
+// Icon components map - avoid recreating elements
+const TAB_ICONS: Record<TabId, React.ReactNode> = {
+  animation: <FaPlay />,
+  speech: <FaMicrophone />,
+  blink: <FaRegEyeSlash />,
+  aus: <FaSmile />,
+  visemes: <FaComment />,
+  tracking: <FaEye />,
+  hair: <FaCut />,
+  meshes: <FaCubes />,
+  skybox: <FaGlobe />,
+};
 
-// Memoized tab bar
+// Pure CSS tab bar - uses event delegation to avoid per-button handlers
 const TabBar = memo(({
   activeTab,
   onTabClick
 }: {
   activeTab: TabId;
   onTabClick: (tab: TabId) => void;
-}) => (
-  <VStack
-    spacing={1}
-    py={4}
-    px={2}
-    bg="gray.900"
-    borderRight="1px solid"
-    borderColor="gray.700"
-    align="center"
-  >
-    {TABS.map((tab) => (
-      <TabButton
-        key={tab.id}
-        tabId={tab.id}
-        icon={tab.icon}
-        label={tab.label}
-        isActive={activeTab === tab.id}
-        onTabClick={onTabClick}
-      />
-    ))}
-  </VStack>
-));
+}) => {
+  // Inject styles on first render
+  useEffect(() => {
+    injectStyles();
+  }, []);
+
+  // Single click handler using event delegation
+  const handleClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    const button = (e.target as HTMLElement).closest('button');
+    if (button) {
+      const tabId = button.getAttribute('data-tab') as TabId;
+      if (tabId) onTabClick(tabId);
+    }
+  }, [onTabClick]);
+
+  return (
+    <nav
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+        padding: '16px 8px',
+        background: '#171923',
+        borderRight: '1px solid #2D3748',
+        alignItems: 'center',
+      }}
+      onClick={handleClick}
+    >
+      {TABS.map((tab) => (
+        <button
+          key={tab.id}
+          data-tab={tab.id}
+          className={`slider-drawer-tab${activeTab === tab.id ? ' active' : ''}`}
+          data-tooltip={tab.label}
+          aria-label={tab.label}
+          type="button"
+        >
+          {TAB_ICONS[tab.id]}
+        </button>
+      ))}
+    </nav>
+  );
+});
 
 // ============ Individual Tab Content Components ============
 
@@ -163,8 +241,8 @@ const SpeechTabContent = memo(({ engine, disabled }: { engine: EngineThree | nul
 ));
 
 // Blink Tab
-const BlinkTabContent = memo(({ blinkService, disabled }: { blinkService: BlinkService | null; disabled: boolean }) => (
-  <BlinkSection blinkService={blinkService} disabled={disabled} defaultExpanded />
+const BlinkTabContent = memo(({ disabled }: { disabled: boolean }) => (
+  <BlinkSection disabled={disabled} defaultExpanded />
 ));
 
 // Tracking Tab
@@ -173,8 +251,8 @@ const TrackingTabContent = memo(({ engine, disabled }: { engine: EngineThree | n
 ));
 
 // Hair Tab
-const HairTabContent = memo(({ hairService, disabled }: { hairService: HairService | null; disabled: boolean }) => (
-  <HairSection hairService={hairService} disabled={disabled} defaultExpanded />
+const HairTabContent = memo(({ disabled }: { disabled: boolean }) => (
+  <HairSection disabled={disabled} defaultExpanded />
 ));
 
 // Meshes Tab
@@ -206,28 +284,38 @@ const AUControlsPanel = memo(({
   onSegmentationModeToggle: () => void;
 }) => (
   <Box p={3} bg="gray.750" borderRadius="md">
-    <VStack spacing={2} align="stretch">
-      <Button size="sm" onClick={onResetToNeutral} colorScheme="red" fontWeight="semibold">
+    <VStack gap={2} align="stretch">
+      <Button size="sm" onClick={onResetToNeutral} colorPalette="red" fontWeight="semibold">
         Reset to Neutral
       </Button>
       <HStack justify="space-between">
         <Text fontSize="sm" color="gray.300">Use curve editor</Text>
-        <Switch
-          isChecked={useCurveEditor}
-          onChange={(e) => onUseCurveEditorChange(e.target.checked)}
+        <Switch.Root
+          checked={useCurveEditor}
+          onCheckedChange={(details) => onUseCurveEditorChange(details.checked)}
           size="sm"
-          colorScheme="brand"
-        />
+          colorPalette="brand"
+        >
+          <Switch.HiddenInput />
+          <Switch.Control>
+            <Switch.Thumb />
+          </Switch.Control>
+        </Switch.Root>
       </HStack>
       {useCurveEditor && (
         <HStack justify="space-between">
           <Text fontSize="sm" color="gray.300">Show only playing</Text>
-          <Switch
-            isChecked={showOnlyPlayingSnippets}
-            onChange={(e) => onShowOnlyPlayingChange(e.target.checked)}
+          <Switch.Root
+            checked={showOnlyPlayingSnippets}
+            onCheckedChange={(details) => onShowOnlyPlayingChange(details.checked)}
             size="sm"
-            colorScheme="green"
-          />
+            colorPalette="green"
+          >
+            <Switch.HiddenInput />
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+          </Switch.Root>
         </HStack>
       )}
       <HStack justify="space-between">
@@ -235,7 +323,7 @@ const AUControlsPanel = memo(({
         <Button
           size="xs"
           onClick={onSegmentationModeToggle}
-          colorScheme="brand"
+          colorPalette="brand"
           variant="outline"
         >
           {segmentationMode === 'facePart' ? 'Face Part' : 'Face Area'}
@@ -252,18 +340,14 @@ const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; d
   const [segmentationMode, setSegmentationMode] = useState<'facePart' | 'faceArea'>('facePart');
   const [useCurveEditor, setUseCurveEditor] = useState(false);
   const [showOnlyPlayingSnippets, setShowOnlyPlayingSnippets] = useState(false);
-  const [auSnippetCurves, setAuSnippetCurves] = useState<Record<string, SnippetCurveData[]>>({});
 
-  const showOnlyPlayingRef = useRef(showOnlyPlayingSnippets);
-  showOnlyPlayingRef.current = showOnlyPlayingSnippets;
-
-  const processAnimationSnapshot = useCallback((snapshot: any) => {
-    const animations = (snapshot?.context?.animations as NormalizedSnippet[]) || [];
+  // Build AU curves from snippet list
+  const buildAuCurves = useCallback((snippets: NormalizedSnippet[], filterPlaying: boolean) => {
     const newAuCurves: Record<string, SnippetCurveData[]> = {};
 
-    animations.forEach(snippet => {
+    snippets.forEach(snippet => {
       if (!snippet.curves) return;
-      if (showOnlyPlayingRef.current && !snippet.isPlaying) return;
+      if (filterPlaying && !snippet.isPlaying) return;
 
       const currentTime = snippet.currentTime || 0;
 
@@ -285,14 +369,20 @@ const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; d
       });
     });
 
-    setAuSnippetCurves(newAuCurves);
+    return newAuCurves;
   }, []);
 
-  useEffect(() => {
-    if (!anim?.onTransition) return;
-    const unsubscribe = anim.onTransition(processAnimationSnapshot);
-    return unsubscribe;
-  }, [anim, processAnimationSnapshot]);
+  // Subscribe to animations via useSelector (efficient - only re-renders when animations change)
+  const snippets = useSelector(
+    anim?.actor,
+    (state) => (state?.context?.animations ?? EMPTY_SNIPPETS) as NormalizedSnippet[]
+  ) ?? EMPTY_SNIPPETS;
+
+  // Build AU curves from snippets (memoized to prevent unnecessary rebuilds)
+  const auSnippetCurves = useMemo(
+    () => buildAuCurves(snippets, showOnlyPlayingSnippets),
+    [snippets, buildAuCurves, showOnlyPlayingSnippets]
+  );
 
   const actionUnits = useMemo(() => Object.values(AU_INFO), []);
 
@@ -325,7 +415,7 @@ const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; d
   }, []);
 
   return (
-    <VStack spacing={4} align="stretch">
+    <VStack gap={4} align="stretch">
       <AUControlsPanel
         onResetToNeutral={handleResetToNeutral}
         useCurveEditor={useCurveEditor}
@@ -335,7 +425,7 @@ const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; d
         segmentationMode={segmentationMode}
         onSegmentationModeToggle={handleSegmentationModeToggle}
       />
-      <Accordion allowMultiple>
+      <Accordion.Root multiple>
         {filteredSections.map((sectionData) => (
           <AUSection
             key={sectionData.name}
@@ -347,7 +437,7 @@ const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; d
             auSnippetCurves={auSnippetCurves}
           />
         ))}
-      </Accordion>
+      </Accordion.Root>
     </VStack>
   );
 });
@@ -357,13 +447,11 @@ const VisemesTabContent = memo(({ engine, disabled }: { engine: EngineThree | nu
   const { anim } = useThreeState();
 
   const [useCurveEditor, setUseCurveEditor] = useState(false);
-  const [visemeSnippetCurves, setVisemeSnippetCurves] = useState<Record<string, SnippetCurveData[]>>({});
 
-  const processAnimationSnapshot = useCallback((snapshot: any) => {
-    const animations = (snapshot?.context?.animations as NormalizedSnippet[]) || [];
+  const buildVisemeCurves = useCallback((snippets: NormalizedSnippet[]) => {
     const newVisemeCurves: Record<string, SnippetCurveData[]> = {};
 
-    animations.forEach(snippet => {
+    snippets.forEach(snippet => {
       if (!snippet.curves) return;
 
       const currentTime = snippet.currentTime || 0;
@@ -385,14 +473,17 @@ const VisemesTabContent = memo(({ engine, disabled }: { engine: EngineThree | nu
       });
     });
 
-    setVisemeSnippetCurves(newVisemeCurves);
+    return newVisemeCurves;
   }, []);
 
-  useEffect(() => {
-    if (!anim?.onTransition) return;
-    const unsubscribe = anim.onTransition(processAnimationSnapshot);
-    return unsubscribe;
-  }, [anim, processAnimationSnapshot]);
+  // Subscribe to animations via useSelector (efficient - only re-renders when animations change)
+  const snippets = useSelector(
+    anim?.actor,
+    (state) => (state?.context?.animations ?? EMPTY_SNIPPETS) as NormalizedSnippet[]
+  ) ?? EMPTY_SNIPPETS;
+
+  // Build viseme curves from snippets (memoized to prevent unnecessary rebuilds)
+  const visemeSnippetCurves = useMemo(() => buildVisemeCurves(snippets), [snippets, buildVisemeCurves]);
 
   return (
     <VisemeSection
@@ -405,18 +496,123 @@ const VisemesTabContent = memo(({ engine, disabled }: { engine: EngineThree | nu
   );
 });
 
+// ============ Tab Content Container ============
+// Manages lazy mounting of tabs and visibility via CSS
+
+interface TabContentContainerProps {
+  activeTab: TabId;
+  mountedTabs: Set<TabId>;
+  engine: EngineThree | null;
+  disabled: boolean;
+}
+
+// Memoized content wrapper - uses CSS class for visibility (no re-render on tab switch)
+const TabPanel = memo(({
+  tabId,
+  isActive,
+  children
+}: {
+  tabId: TabId;
+  isActive: boolean;
+  children: React.ReactNode;
+}) => (
+  <div className={`tab-panel${isActive ? ' active' : ''}`}>
+    {children}
+  </div>
+));
+
+// Each tab content component is wrapped individually to prevent re-renders
+const MemoizedAnimationContent = memo(() => <AnimationTabContent />);
+const MemoizedSpeechContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+  <SpeechTabContent engine={engine} disabled={disabled} />
+);
+const MemoizedBlinkContent = memo(({ disabled }: { disabled: boolean }) =>
+  <BlinkTabContent disabled={disabled} />
+);
+const MemoizedAUContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+  <AUTabContent engine={engine} disabled={disabled} />
+);
+const MemoizedVisemesContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+  <VisemesTabContent engine={engine} disabled={disabled} />
+);
+const MemoizedTrackingContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+  <TrackingTabContent engine={engine} disabled={disabled} />
+);
+const MemoizedHairContent = memo(({ disabled }: { disabled: boolean }) =>
+  <HairTabContent disabled={disabled} />
+);
+const MemoizedMeshesContent = memo(({ engine }: { engine: EngineThree | null }) =>
+  <MeshesTabContent engine={engine} />
+);
+const MemoizedSkyboxContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+  <SkyboxTabContent engine={engine} disabled={disabled} />
+);
+
+const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled }: TabContentContainerProps) => {
+  return (
+    <>
+      {mountedTabs.has('animation') && (
+        <TabPanel tabId="animation" isActive={activeTab === 'animation'}>
+          <MemoizedAnimationContent />
+        </TabPanel>
+      )}
+      {mountedTabs.has('speech') && (
+        <TabPanel tabId="speech" isActive={activeTab === 'speech'}>
+          <MemoizedSpeechContent engine={engine} disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('blink') && (
+        <TabPanel tabId="blink" isActive={activeTab === 'blink'}>
+          <MemoizedBlinkContent disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('aus') && (
+        <TabPanel tabId="aus" isActive={activeTab === 'aus'}>
+          <MemoizedAUContent engine={engine} disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('visemes') && (
+        <TabPanel tabId="visemes" isActive={activeTab === 'visemes'}>
+          <MemoizedVisemesContent engine={engine} disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('tracking') && (
+        <TabPanel tabId="tracking" isActive={activeTab === 'tracking'}>
+          <MemoizedTrackingContent engine={engine} disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('hair') && (
+        <TabPanel tabId="hair" isActive={activeTab === 'hair'}>
+          <MemoizedHairContent disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('meshes') && (
+        <TabPanel tabId="meshes" isActive={activeTab === 'meshes'}>
+          <MemoizedMeshesContent engine={engine} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('skybox') && (
+        <TabPanel tabId="skybox" isActive={activeTab === 'skybox'}>
+          <MemoizedSkyboxContent engine={engine} disabled={disabled} />
+        </TabPanel>
+      )}
+    </>
+  );
+});
+
 // ============ Main Drawer Component ============
 
 export default function SliderDrawer({
   isOpen,
   onToggle,
   disabled = false,
-  hairService,
-  blinkService
 }: SliderDrawerProps) {
   const { engine } = useThreeState();
 
   const [activeTab, setActiveTab] = useState<TabId>('animation');
+
+  // Track which tabs have been mounted (for lazy loading)
+  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set(['animation']));
 
   // Lazy rendering - only render content after first open
   const hasBeenOpenedRef = useRef(false);
@@ -425,59 +621,70 @@ export default function SliderDrawer({
   }
   const hasBeenOpened = hasBeenOpenedRef.current;
 
-  // Stable tab click handler
+  // Stable tab click handler that mounts new tabs lazily
   const handleTabClick = useCallback((tabId: TabId) => {
     setActiveTab(tabId);
+    setMountedTabs(prev => {
+      if (prev.has(tabId)) return prev;
+      const next = new Set(prev);
+      next.add(tabId);
+      return next;
+    });
+  }, []);
+
+  // Ensure styles are injected
+  useEffect(() => {
+    injectStyles();
   }, []);
 
   return (
     <>
-      <IconButton
-        icon={<FaBars />}
+      <button
+        className="slider-drawer-menu-btn"
         onClick={onToggle}
-        position="fixed"
-        top="1rem"
-        left="1rem"
-        zIndex="overlay"
-        colorScheme="brand"
         aria-label="Menu"
-        size="lg"
-        boxShadow="lg"
-        _hover={{ transform: 'scale(1.05)', boxShadow: 'xl' }}
-        transition="all 0.2s"
-      />
-
-      <Drawer
-        isOpen={isOpen}
-        placement="left"
-        onClose={onToggle}
-        size="md"
-        motionPreset="none"
       >
-        {!isOpen && !hasBeenOpened ? null : (
-          <DrawerContent zIndex={9999} bg="gray.800">
-            <DrawerCloseButton color="gray.400" _hover={{ color: 'gray.200', bg: 'gray.700' }} />
+        <FaBars />
+      </button>
 
-            <HStack align="stretch" h="100%" spacing={0}>
-              <TabBar activeTab={activeTab} onTabClick={handleTabClick} />
+      <Drawer.Root
+        open={isOpen}
+        placement="start"
+        onOpenChange={(details) => { if (!details.open) onToggle(); }}
+        size="md"
+      >
+        <Drawer.Backdrop />
+        <Drawer.Positioner>
+          {!isOpen && !hasBeenOpened ? null : (
+            <Drawer.Content zIndex={9999} bg="gray.800">
+              <Drawer.CloseTrigger asChild>
+                <CloseButton
+                  position="absolute"
+                  top={2}
+                  right={2}
+                  color="gray.400"
+                  _hover={{ color: 'gray.200', bg: 'gray.700' }}
+                />
+              </Drawer.CloseTrigger>
 
-              <Box flex={1} display="flex" flexDirection="column" overflow="hidden">
-                <DrawerBody bg="transparent" flex={1} overflowY="auto" pt={4}>
-                  {activeTab === 'animation' && <AnimationTabContent />}
-                  {activeTab === 'speech' && <SpeechTabContent engine={engine} disabled={disabled} />}
-                  {activeTab === 'blink' && <BlinkTabContent blinkService={blinkService ?? null} disabled={disabled} />}
-                  {activeTab === 'aus' && <AUTabContent engine={engine} disabled={disabled} />}
-                  {activeTab === 'visemes' && <VisemesTabContent engine={engine} disabled={disabled} />}
-                  {activeTab === 'tracking' && <TrackingTabContent engine={engine} disabled={disabled} />}
-                  {activeTab === 'hair' && <HairTabContent hairService={hairService ?? null} disabled={disabled} />}
-                  {activeTab === 'meshes' && <MeshesTabContent engine={engine} />}
-                  {activeTab === 'skybox' && <SkyboxTabContent engine={engine} disabled={disabled} />}
-                </DrawerBody>
-              </Box>
-            </HStack>
-          </DrawerContent>
-        )}
-      </Drawer>
+              <HStack align="stretch" h="100%" gap={0}>
+                <TabBar activeTab={activeTab} onTabClick={handleTabClick} />
+
+                <Box flex={1} display="flex" flexDirection="column" overflow="hidden">
+                  <Drawer.Body bg="transparent" flex={1} overflowY="auto" pt={4}>
+                    <TabContentContainer
+                      activeTab={activeTab}
+                      mountedTabs={mountedTabs}
+                      engine={engine}
+                      disabled={disabled}
+                    />
+                  </Drawer.Body>
+                </Box>
+              </HStack>
+            </Drawer.Content>
+          )}
+        </Drawer.Positioner>
+      </Drawer.Root>
     </>
   );
 }

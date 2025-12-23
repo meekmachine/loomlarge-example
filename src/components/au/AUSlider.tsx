@@ -1,64 +1,82 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo, useRef } from 'react';
 import {
   Box,
   Slider,
-  SliderTrack,
-  SliderFilledTrack,
-  SliderThumb,
   Tooltip,
   Text,
   Image,
   VStack,
   HStack
 } from '@chakra-ui/react';
-import { EngineThree, MIXED_AUS } from '../../engine/EngineThree';
+import { EngineThree, MIXED_AUS, hasLeftRightMorphs } from '../../engine/EngineThree';
 
 interface AUSliderProps {
   au: string | number;
   name: string;
-  intensity: number;
-  onChange: (newIntensity: number) => void;
+  initialIntensity?: number; // Optional initial value (uncontrolled)
+  initialBalance?: number; // Optional initial balance (-1 to +1)
   muscularBasis?: string;
   links?: string[];
-  engine?: EngineThree; // Optional: for morph/bone blend control
+  engine?: EngineThree | null; // Optional: for morph/bone blend control
   disabled?: boolean;
-  side?: 'L' | 'R' | 'both'; // Controls which side: Left, Right, or Both (bilateral)
+  onValueChange?: (id: string, value: number) => void; // Optional callback for parent tracking
 }
+
+// Color interpolation helper - defined outside component to avoid recreation
+const getSliderColor = (value: number): string => {
+  const teal = { r: 0, g: 128, b: 128 };
+  const magenta = { r: 255, g: 0, b: 255 };
+  const r = Math.round(teal.r + (magenta.r - teal.r) * value);
+  const g = Math.round(teal.g + (magenta.g - teal.g) * value);
+  const b = Math.round(teal.b + (magenta.b - teal.b) * value);
+  return `rgb(${r}, ${g}, ${b})`;
+};
+
+// Balance slider color - blue for left, orange for right
+const getBalanceColor = (balance: number): string => {
+  if (balance < 0) {
+    const intensity = Math.abs(balance);
+    return `rgba(66, 153, 225, ${0.3 + intensity * 0.7})`; // blue
+  } else if (balance > 0) {
+    return `rgba(237, 137, 54, ${0.3 + balance * 0.7})`; // orange
+  }
+  return 'rgba(128, 128, 128, 0.5)'; // neutral gray
+};
 
 /**
  * AUSlider - Controls Action Unit intensity from 0-1
- * Calls engine.setAU() directly via onChange callback
+ * UNCONTROLLED component - manages its own state and syncs directly to engine
+ * For bilateral AUs (with L/R morphs), displays a balance slider (-1 to +1)
  * For mixed AUs (morph + bone), displays an additional blend slider
  */
 const AUSlider: React.FC<AUSliderProps> = ({
   au,
   name,
-  intensity,
-  onChange,
+  initialIntensity = 0,
+  initialBalance = 0,
   muscularBasis,
   links,
   engine,
   disabled = false,
-  side = 'both'
+  onValueChange
 }) => {
+  // Internal state - component is uncontrolled
+  const [intensity, setIntensity] = useState(initialIntensity);
+  const [balance, setBalance] = useState(initialBalance);
   const [showImageTooltip, setShowImageTooltip] = useState(false);
   const [showValueTooltip, setShowValueTooltip] = useState(false);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [mixValue, setMixValue] = useState<number>(1); // Default to 1 (full intensity)
 
-  // Check if this AU is a mixed AU (controls both morphs and bones)
-  const auId = typeof au === 'number' ? au : parseInt(String(au).replace(/[^\d]/g, ''));
-  const isMixedAU = MIXED_AUS.has(auId);
+  // Stable ref for callback to avoid recreating handlers
+  const onValueChangeRef = useRef(onValueChange);
+  onValueChangeRef.current = onValueChange;
 
-  // Color interpolation: teal (0) -> magenta (1)
-  const getSliderColor = (value: number): string => {
-    const teal = { r: 0, g: 128, b: 128 };
-    const magenta = { r: 255, g: 0, b: 255 };
-    const r = Math.round(teal.r + (magenta.r - teal.r) * value);
-    const g = Math.round(teal.g + (magenta.g - teal.g) * value);
-    const b = Math.round(teal.b + (magenta.b - teal.b) * value);
-    return `rgb(${r}, ${g}, ${b})`;
-  };
+  // Check AU properties
+  const auId = typeof au === 'number' ? au : parseInt(String(au).replace(/[^\d]/g, ''));
+  const auIdStr = String(au);
+  const isMixedAU = MIXED_AUS.has(auId);
+  const isBilateralAU = hasLeftRightMorphs(auId);
 
   // Fetch Wikipedia images for muscle info
   useEffect(() => {
@@ -89,17 +107,23 @@ const AUSlider: React.FC<AUSliderProps> = ({
   }, [links]);
 
   const handleIntensityChange = (value: number) => {
-    onChange(value);
+    setIntensity(value);
 
-    // Apply to engine with side suffix if needed
+    // Notify parent if callback provided (for tracking visible sliders)
+    onValueChangeRef.current?.(auIdStr, value);
+
+    // Apply to engine (balance is applied via stored auBalances)
     if (engine) {
-      if (side === 'L') {
-        engine.setAU(`${auId}L` as any, value);
-      } else if (side === 'R') {
-        engine.setAU(`${auId}R` as any, value);
-      } else {
-        engine.setAU(auId, value);
-      }
+      engine.setAU(auId, value);
+    }
+  };
+
+  const handleBalanceChange = (value: number) => {
+    setBalance(value);
+
+    // Apply balance to engine
+    if (engine) {
+      engine.setAUBalance(auId, value);
     }
   };
 
@@ -119,70 +143,106 @@ const AUSlider: React.FC<AUSliderProps> = ({
     }
   };
 
-  // Display name with side indicator
-  const displayName = side === 'both' ? name : `${name} (${side})`;
-  const displayLabel = side === 'both' ? `${au} - ${name}` : `${au}${side} - ${displayName}`;
+  // Get current balance from engine
+  const getBalance = () => {
+    if (engine && isBilateralAU) {
+      return engine.getAUBalance(auId) ?? balance;
+    }
+    return balance;
+  };
+
+  const displayLabel = `${au} - ${name}`;
 
   return (
-    <VStack width="100%" align="stretch" spacing={2}>
+    <VStack width="100%" align="stretch" gap={2}>
       <Box>
-        <Text mb="2" display="inline" fontSize="sm" color="gray.50">
+        <Box mb="2" display="inline" fontSize="sm" color="gray.50">
           {displayLabel}
           {muscularBasis && (
-            <Tooltip
-              label={
-                <VStack align="start">
-                  {muscularBasis.split(', ').map((muscle, i) => (
-                    imageUrls[i]
-                      ? <Image key={i} src={imageUrls[i]} alt={muscle} boxSize="100px" />
-                      : <Text key={i}>{muscle}</Text>
-                  ))}
-                </VStack>
-              }
-              isOpen={showImageTooltip}
-              hasArrow
-            >
-              <Text
-                as="span"
-                fontSize="xs"
-                ml={2}
-                color="brand.300"
-                onMouseEnter={() => setShowImageTooltip(true)}
-                onMouseLeave={() => setShowImageTooltip(false)}
-                style={{ textDecoration: "underline", cursor: "pointer" }}
-              >
-                {muscularBasis}
-              </Text>
-            </Tooltip>
+            <Tooltip.Root open={showImageTooltip}>
+              <Tooltip.Trigger asChild>
+                <Box
+                  as="span"
+                  fontSize="xs"
+                  ml={2}
+                  color="brand.300"
+                  onMouseEnter={() => setShowImageTooltip(true)}
+                  onMouseLeave={() => setShowImageTooltip(false)}
+                  style={{ textDecoration: "underline", cursor: "pointer" }}
+                >
+                  {muscularBasis}
+                </Box>
+              </Tooltip.Trigger>
+              <Tooltip.Positioner>
+                <Tooltip.Content>
+                  <VStack align="start">
+                    {muscularBasis.split(', ').map((muscle, i) => (
+                      imageUrls[i]
+                        ? <Image key={i} src={imageUrls[i]} alt={muscle} boxSize="100px" />
+                        : <Box as="span" key={i}>{muscle}</Box>
+                    ))}
+                  </VStack>
+                </Tooltip.Content>
+              </Tooltip.Positioner>
+            </Tooltip.Root>
           )}
-        </Text>
+        </Box>
 
-        <Slider
-          id={String(au)}
-          value={intensity}
+        <Slider.Root
+          value={[intensity]}
           min={0}
           max={1}
           step={0.01}
-          isDisabled={disabled}
-          onChange={handleIntensityChange}
+          disabled={disabled}
+          onValueChange={(details) => handleIntensityChange(details.value[0])}
           onMouseEnter={() => setShowValueTooltip(true)}
           onMouseLeave={() => setShowValueTooltip(false)}
         >
-          <SliderTrack>
-            <SliderFilledTrack bg={getSliderColor(intensity)} />
-          </SliderTrack>
-          <Tooltip
-            hasArrow
-            label={`${(intensity * 100).toFixed(0)}%`}
-            bg="gray.300"
-            color="black"
-            placement="top"
-            isOpen={showValueTooltip}
-          >
-            <SliderThumb boxSize={6} />
-          </Tooltip>
-        </Slider>
+          <Slider.Control>
+            <Slider.Track>
+              <Slider.Range style={{ background: getSliderColor(intensity) }} />
+            </Slider.Track>
+            <Tooltip.Root open={showValueTooltip}>
+              <Tooltip.Trigger asChild>
+                <Slider.Thumb index={0} boxSize={6} />
+              </Tooltip.Trigger>
+              <Tooltip.Positioner>
+                <Tooltip.Content bg="gray.300" color="black">
+                  {`${(intensity * 100).toFixed(0)}%`}
+                </Tooltip.Content>
+              </Tooltip.Positioner>
+            </Tooltip.Root>
+          </Slider.Control>
+        </Slider.Root>
       </Box>
+
+      {/* Balance slider (L ↔ R) for bilateral AUs */}
+      {isBilateralAU && engine && (
+        <Box pt={2} borderTop="1px solid" borderColor="gray.600">
+          <HStack mb={1} justify="space-between">
+            <Text fontSize="xs" color="blue.300">L</Text>
+            <Text fontSize="xs" color="gray.300">
+              Balance {getBalance().toFixed(2)}
+            </Text>
+            <Text fontSize="xs" color="orange.300">R</Text>
+          </HStack>
+          <Slider.Root
+            min={-1}
+            max={1}
+            step={0.01}
+            value={[getBalance()]}
+            disabled={disabled}
+            onValueChange={(details) => handleBalanceChange(details.value[0])}
+          >
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range style={{ background: getBalanceColor(getBalance()) }} />
+              </Slider.Track>
+              <Slider.Thumb index={0} boxSize={4} />
+            </Slider.Control>
+          </Slider.Root>
+        </Box>
+      )}
 
       {/* Morph ↔ Bone blend slider (only for mixed AUs with bone bindings) */}
       {isMixedAU && engine && (
@@ -193,24 +253,27 @@ const AUSlider: React.FC<AUSliderProps> = ({
               {getMix().toFixed(2)}
             </Text>
           </HStack>
-          <Slider
-            aria-label="morph-bone-blend"
+          <Slider.Root
+            aria-label={["morph-bone-blend"]}
             min={0}
             max={1}
             step={0.01}
-            value={getMix()}
-            isDisabled={disabled}
-            onChange={handleMixChange}
+            value={[getMix()]}
+            disabled={disabled}
+            onValueChange={(details) => handleMixChange(details.value[0])}
           >
-            <SliderTrack>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb boxSize={4} />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range />
+              </Slider.Track>
+              <Slider.Thumb index={0} boxSize={4} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
       )}
     </VStack>
   );
 };
 
-export default AUSlider;
+// Memoize to prevent rerenders when parent state changes
+export default memo(AUSlider);

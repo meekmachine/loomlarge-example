@@ -2,9 +2,6 @@ import React, { useState } from 'react';
 import {
   Box,
   Slider,
-  SliderTrack,
-  SliderFilledTrack,
-  SliderThumb,
   Tooltip,
   Text
 } from '@chakra-ui/react';
@@ -47,29 +44,31 @@ const VisemeSlider: React.FC<VisemeSliderProps> = ({
     <Box width="100%">
       {name && <Text mb={2} fontSize="sm">{name}</Text>}
 
-      <Slider
-        value={intensity}
+      <Slider.Root
+        value={[intensity]}
         min={0}
         max={1}
         step={0.01}
-        onChange={handleSliderChange}
+        onValueChange={(details) => handleSliderChange(details.value[0])}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
       >
-        <SliderTrack>
-          <SliderFilledTrack bg={getSliderColor(intensity)} />
-        </SliderTrack>
-        <Tooltip
-          hasArrow
-          bg="teal.500"
-          color="white"
-          placement="top"
-          isOpen={showTooltip}
-          label={`${(intensity * 100).toFixed(0)}%`}
-        >
-          <SliderThumb />
-        </Tooltip>
-      </Slider>
+        <Slider.Control>
+          <Slider.Track>
+            <Slider.Range style={{ background: getSliderColor(intensity) }} />
+          </Slider.Track>
+          <Tooltip.Root open={showTooltip}>
+            <Tooltip.Trigger asChild>
+              <Slider.Thumb index={0} />
+            </Tooltip.Trigger>
+            <Tooltip.Positioner>
+              <Tooltip.Content bg="teal.500" color="white">
+                {`${(intensity * 100).toFixed(0)}%`}
+              </Tooltip.Content>
+            </Tooltip.Positioner>
+          </Tooltip.Root>
+        </Slider.Control>
+      </Slider.Root>
     </Box>
   );
 };

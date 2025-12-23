@@ -3,10 +3,10 @@ import {
   VStack,
   HStack,
   Text,
-  Select,
+  NativeSelect,
   Box,
   Badge,
-  Divider
+  Separator
 } from '@chakra-ui/react';
 
 export type EngineType = 'three' | 'fiber';
@@ -34,7 +34,7 @@ export default function EngineSceneSwitcher({
 }: EngineSceneSwitcherProps) {
   return (
     <Box>
-      <VStack spacing={4} align="stretch">
+      <VStack gap={4} align="stretch">
         {/* Engine Selector */}
         <Box>
           <HStack justify="space-between" mb={2}>
@@ -42,29 +42,30 @@ export default function EngineSceneSwitcher({
               Rendering Engine
             </Text>
             <Badge
-              colorScheme={currentEngine === 'fiber' ? 'green' : 'blue'}
+              colorPalette={currentEngine === 'fiber' ? 'green' : 'blue'}
               fontSize="xs"
             >
               {currentEngine === 'fiber' ? 'R3F' : 'Three.js'}
             </Badge>
           </HStack>
-          <Select
-            value={currentEngine}
-            onChange={(e) => onEngineChange(e.target.value as EngineType)}
-            size="sm"
-            bg="gray.700"
-            borderColor="gray.600"
-            color="gray.100"
-            _hover={{ borderColor: 'gray.500' }}
-            _focus={{ borderColor: 'brand.400', boxShadow: '0 0 0 1px var(--chakra-colors-brand-400)' }}
-          >
-            <option value="three" style={{ background: '#2D3748' }}>
-              EngineThree (Vanilla Three.js)
-            </option>
-            <option value="fiber" style={{ background: '#2D3748' }}>
-              EngineFour (React Three Fiber)
-            </option>
-          </Select>
+          <NativeSelect.Root size="sm">
+            <NativeSelect.Field
+              value={currentEngine}
+              onChange={(e) => onEngineChange(e.target.value as EngineType)}
+              bg="gray.700"
+              borderColor="gray.600"
+              color="gray.100"
+              _hover={{ borderColor: 'gray.500' }}
+              _focus={{ borderColor: 'brand.400', boxShadow: '0 0 0 1px var(--chakra-colors-brand-400)' }}
+            >
+              <option value="three" style={{ background: '#2D3748' }}>
+                EngineThree (Vanilla Three.js)
+              </option>
+              <option value="fiber" style={{ background: '#2D3748' }}>
+                EngineFour (React Three Fiber)
+              </option>
+            </NativeSelect.Field>
+          </NativeSelect.Root>
           <Text fontSize="xs" color="gray.500" mt={1}>
             {currentEngine === 'three'
               ? 'Classic imperative Three.js engine with manual RAF loop'
@@ -72,7 +73,7 @@ export default function EngineSceneSwitcher({
           </Text>
         </Box>
 
-        <Divider borderColor="gray.700" />
+        <Separator borderColor="gray.700" />
 
         {/* Scene Selector */}
         <Box>
@@ -81,29 +82,30 @@ export default function EngineSceneSwitcher({
               Scene Renderer
             </Text>
             <Badge
-              colorScheme={currentScene === 'fiber' ? 'green' : 'blue'}
+              colorPalette={currentScene === 'fiber' ? 'green' : 'blue'}
               fontSize="xs"
             >
               {currentScene === 'fiber' ? 'R3F' : 'Three.js'}
             </Badge>
           </HStack>
-          <Select
-            value={currentScene}
-            onChange={(e) => onSceneChange(e.target.value as SceneType)}
-            size="sm"
-            bg="gray.700"
-            borderColor="gray.600"
-            color="gray.100"
-            _hover={{ borderColor: 'gray.500' }}
-            _focus={{ borderColor: 'brand.400', boxShadow: '0 0 0 1px var(--chakra-colors-brand-400)' }}
-          >
-            <option value="glb" style={{ background: '#2D3748' }}>
-              CharacterGLBScene (Three.js Canvas)
-            </option>
-            <option value="fiber" style={{ background: '#2D3748' }}>
-              CharacterFiberScene (R3F Canvas)
-            </option>
-          </Select>
+          <NativeSelect.Root size="sm">
+            <NativeSelect.Field
+              value={currentScene}
+              onChange={(e) => onSceneChange(e.target.value as SceneType)}
+              bg="gray.700"
+              borderColor="gray.600"
+              color="gray.100"
+              _hover={{ borderColor: 'gray.500' }}
+              _focus={{ borderColor: 'brand.400', boxShadow: '0 0 0 1px var(--chakra-colors-brand-400)' }}
+            >
+              <option value="glb" style={{ background: '#2D3748' }}>
+                CharacterGLBScene (Three.js Canvas)
+              </option>
+              <option value="fiber" style={{ background: '#2D3748' }}>
+                CharacterFiberScene (R3F Canvas)
+              </option>
+            </NativeSelect.Field>
+          </NativeSelect.Root>
           <Text fontSize="xs" color="gray.500" mt={1}>
             {currentScene === 'glb'
               ? 'Manual WebGL renderer with custom loading animation'

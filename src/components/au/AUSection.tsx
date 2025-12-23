@@ -1,12 +1,13 @@
 import React, { memo, useCallback } from 'react';
-import { VStack, Box, Text, Button, HStack, useToast } from '@chakra-ui/react';
-import { AddIcon } from '@chakra-ui/icons';
+import { VStack, Box, Text, Button, HStack } from '@chakra-ui/react';
+import { Plus } from 'lucide-react';
+import { toaster } from '../ui/toaster';
 import DockableAccordionItem from './DockableAccordionItem';
 import AUSlider from './AUSlider';
 import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
 import { AUInfo } from '../../engine/arkit/shapeDict';
-import { EngineThree, CONTINUUM_PAIRS, hasLeftRightMorphs } from '../../engine/EngineThree';
+import { EngineThree, CONTINUUM_PAIRS } from '../../engine/EngineThree';
 import type { NormalizedSnippet } from '../../latticework/animation/types';
 import { useEngineState } from '../../context/engineContext';
 
@@ -30,6 +31,9 @@ const CONTINUUM_LABELS: Record<string, string> = {
   '30-35': 'Jaw — Horizontal',
   '38-37': 'Tongue — Vertical',
   '39-40': 'Tongue — Horizontal',
+  '41-42': 'Tongue — Tilt',
+  '73-74': 'Tongue — Width',
+  '76-77': 'Tongue Tip — Vertical',
 };
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -131,7 +135,6 @@ function AUSection({
   auSnippetCurves = {}
 }: AUSectionProps) {
   const { anim } = useEngineState();
-  const toast = useToast();
 
   // Build a map of AU ID to continuum pair info
   const continuumMap = new Map<number, { pair: typeof CONTINUUM_PAIRS[0]; isNegative: boolean }>();
@@ -146,10 +149,8 @@ function AUSection({
   // Create a new animation snippet for an AU
   const createNewAnimation = (auId: string, auName: string) => {
     if (!anim) {
-      toast({
+      toaster.error({
         title: 'Animation service not available',
-        status: 'error',
-        duration: 3000
       });
       return;
     }
@@ -178,24 +179,19 @@ function AUSection({
     anim.schedule(snippet);
     anim.setSnippetPlaying(name, true);
 
-    toast({
+    toaster.success({
       title: 'Animation created',
       description: `${name} added to animation service`,
-      status: 'success',
-      duration: 3000
     });
   };
 
   // If curve editor mode, render curve editors for all AUs (one per snippet)
   if (useCurveEditor) {
-    console.log(`[AUSection:${section}] Curve editor mode enabled`);
-    console.log(`[AUSection:${section}] auSnippetCurves:`, auSnippetCurves);
-    console.log(`[AUSection:${section}] AUs in this section:`, aus.map(au => au.id));
     const renderedContinuums = new Set<string>();
 
     return (
       <DockableAccordionItem title={section}>
-        <VStack spacing={4} mt={2} align="stretch">
+        <VStack gap={4} mt={2} align="stretch">
           {aus.map((au) => {
             if (renderedAUs.has(au.id)) return null;
 
@@ -246,7 +242,7 @@ function AUSection({
                 }
 
                 return (
-                  <VStack key={key} w="100%" spacing={3} align="stretch">
+                  <VStack key={key} w="100%" gap={3} align="stretch">
                     {continuumCurves.map((curveData, idx) => (
                       <Box key={`${key}-${curveData.snippetName}-${idx}`} w="100%">
                         <CurveEditor
@@ -267,7 +263,6 @@ function AUSection({
             }
 
             const snippetCurves = auSnippetCurves[au.id] || [];
-            console.log(`[AUSection:${section}] AU ${au.id} (${au.name}) has ${snippetCurves.length} curves`);
 
             // If no curves, show placeholder with add button
             if (snippetCurves.length === 0) {
@@ -279,12 +274,11 @@ function AUSection({
                     </Text>
                     <Button
                       size="xs"
-                      leftIcon={<AddIcon />}
-                      colorScheme="brand"
+                      colorPalette="brand"
                       variant="outline"
                       onClick={() => createNewAnimation(au.id, au.name)}
                     >
-                      Add Animation
+                      <Plus size={14} /> Add Animation
                     </Button>
                   </HStack>
                 </Box>
@@ -293,7 +287,7 @@ function AUSection({
 
             // Render one curve editor per snippet
             return (
-              <VStack key={au.id} w="100%" spacing={3} align="stretch">
+              <VStack key={au.id} w="100%" gap={3} align="stretch">
                 {snippetCurves.map((curveData, idx) => (
                   <Box key={`${au.id}-${curveData.snippetName}-${idx}`} w="100%">
                     <CurveEditor
@@ -303,11 +297,10 @@ function AUSection({
                       duration={curveData.snippet.duration || 2.0}
                       currentTime={curveData.snippet.currentTime || 0}
                       isPlaying={curveData.snippet.isPlaying || false}
-                      onChange={(updated) => {
+                      onChange={() => {
                         // Note: In this read-only view from animation service,
                         // we don't update the snippets directly. The animation service
                         // controls the keyframes. This is just for visualization.
-                        console.log('Curve edited:', au.id, curveData.snippetName, updated);
                       }}
                     />
                   </Box>
@@ -323,7 +316,7 @@ function AUSection({
   // Otherwise, render sliders (existing behavior)
   return (
     <DockableAccordionItem title={section}>
-      <VStack spacing={4} mt={2} align="stretch">
+      <VStack gap={4} mt={2} align="stretch">
         {aus.map((au) => {
           const auNum = parseInt(au.id);
 
@@ -340,50 +333,8 @@ function AUSection({
             const pairedAU = aus.find(a => parseInt(a.id) === pairedAUId);
 
             if (!pairedAU) {
-              // Pair not in this section, render as individual
-              // Check if this AU has left/right morphs
-              const hasLR = hasLeftRightMorphs(auNum);
-
-              // If AU has left/right variants, render 3 sliders
-              if (hasLR) {
-                return (
-                  <VStack key={au.id} w="100%" spacing={1} align="stretch">
-                    <Box w="100%" bg="gray.800" p={2} borderRadius="md">
-                      <AUSlider
-                        au={au.id}
-                        name={au.name}
-                        muscularBasis={au.muscularBasis}
-                        links={au.links}
-                        engine={engine}
-                        disabled={disabled}
-                        side="both"
-                                              />
-                    </Box>
-                    <HStack w="100%" spacing={2}>
-                      <Box flex={1} bg="gray.750" p={2} borderRadius="md">
-                        <AUSlider
-                          au={au.id}
-                          name={au.name}
-                          engine={engine}
-                          disabled={disabled}
-                          side="L"
-                                                  />
-                      </Box>
-                      <Box flex={1} bg="gray.750" p={2} borderRadius="md">
-                        <AUSlider
-                          au={au.id}
-                          name={au.name}
-                          engine={engine}
-                          disabled={disabled}
-                          side="R"
-                                                  />
-                      </Box>
-                    </HStack>
-                  </VStack>
-                );
-              }
-
-              // Otherwise single bilateral slider
+              // Pair not in this section, render as individual AU slider
+              // AUSlider now handles balance internally for bilateral AUs
               return (
                 <Box key={au.id} w="100%">
                   <AUSlider
@@ -393,8 +344,7 @@ function AUSection({
                     links={au.links}
                     engine={engine}
                     disabled={disabled}
-                    side="both"
-                                      />
+                  />
                 </Box>
               );
             }
@@ -421,52 +371,7 @@ function AUSection({
           }
 
           // Regular individual AU slider
-          // Check if this AU has left/right morphs
-          const hasLR = hasLeftRightMorphs(auNum);
-
-          // If AU has left/right variants, render 3 sliders in a compact layout
-          if (hasLR) {
-            return (
-              <VStack key={au.id} w="100%" spacing={1} align="stretch">
-                {/* Both sides slider */}
-                <Box w="100%" bg="gray.800" p={2} borderRadius="md">
-                  <AUSlider
-                    au={au.id}
-                    name={au.name}
-                    muscularBasis={au.muscularBasis}
-                    links={au.links}
-                    engine={engine}
-                    disabled={disabled}
-                    side="both"
-                                      />
-                </Box>
-
-                {/* Left and Right sliders in a compact row */}
-                <HStack w="100%" spacing={2}>
-                  <Box flex={1} bg="gray.750" p={2} borderRadius="md">
-                    <AUSlider
-                      au={au.id}
-                      name={au.name}
-                      engine={engine}
-                      disabled={disabled}
-                      side="L"
-                                          />
-                  </Box>
-                  <Box flex={1} bg="gray.750" p={2} borderRadius="md">
-                    <AUSlider
-                      au={au.id}
-                      name={au.name}
-                      engine={engine}
-                      disabled={disabled}
-                      side="R"
-                                          />
-                  </Box>
-                </HStack>
-              </VStack>
-            );
-          }
-
-          // Otherwise render single bilateral slider
+          // AUSlider now handles balance internally for bilateral AUs (L/R morphs)
           return (
             <Box key={au.id} w="100%">
               <AUSlider
@@ -476,8 +381,7 @@ function AUSection({
                 links={au.links}
                 engine={engine}
                 disabled={disabled}
-                side="both"
-                              />
+              />
             </Box>
           );
         })}

@@ -1,156 +1,97 @@
-import React, { useCallback, useState, useMemo, useEffect } from 'react';
+import { useCallback, useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import CharacterGLBScene from './scenes/CharacterGLBScene';
-import SliderDrawer from './components/SliderDrawer';
-import ModulesMenu from './components/ModulesMenu';
 import Preloader from './components/Preloader';
 import { useEngineState } from './context/engineContext';
 import { ModulesProvider, useModulesContext } from './context/ModulesContext';
 import { createEyeHeadTrackingService } from './latticework/eyeHeadTracking/eyeHeadTrackingService';
-import { HairService } from './latticework/hair/hairService';
-import { BlinkService } from './latticework/blink/blinkService';
-import './styles.css';
-import { setupGLBCacheDebug } from './utils/glbCacheDebug';
 
-import { AU_TO_MORPHS } from './engine/arkit/shapeDict';
+// Lazy load Chakra UI - won't be parsed/executed until animationReady is true
+const ChakraUI = lazy(() => import('./components/ChakraUI'));
+
+// Profiling
+const mark = (name: string) => performance.mark(name);
+const measure = (name: string, start: string) => {
+  try {
+    performance.measure(name, start);
+    const entries = performance.getEntriesByName(name, 'measure');
+    const last = entries[entries.length - 1];
+    if (last) console.log(`⏱️ ${name}: ${last.duration.toFixed(1)}ms`);
+  } catch {}
+};
+
+// Lazy import for toaster - only loaded when needed
+let toasterPromise: Promise<{ toaster: any }> | null = null;
+const getToaster = () => {
+  if (!toasterPromise) {
+    toasterPromise = import('./components/ChakraUI').then(m => ({ toaster: m.toaster }));
+  }
+  return toasterPromise;
+};
 
 function AppContent() {
   const { engine, anim } = useEngineState();
   const { setEyeHeadTrackingService } = useModulesContext();
 
-  const [auditSummary, setAuditSummary] = useState<{ morphCount:number; totalAUs:number; fullCovered:number; partial:number; zero:number } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [hairService, setHairService] = useState<HairService | null>(null);
-  const [blinkService, setBlinkService] = useState<BlinkService | null>(null);
-
-  // Helper: audit morph coverage
-  function auditMorphCoverage(model: any) {
-    const morphs = new Set<string>();
-    try {
-      model?.traverse?.((obj: any) => {
-        const dict = obj?.morphTargetDictionary;
-        if (dict && typeof dict === 'object') {
-          Object.keys(dict).forEach(k => morphs.add(k));
-        }
-      });
-    } catch {}
-    const mapping = AU_TO_MORPHS || {};
-    const rows: Array<{ au: string; mapped: string[]; present: string[]; missing: string[] }> = [];
-    Object.entries(mapping).forEach(([au, keys]: [string, string[]]) => {
-      const present = keys.filter(k => morphs.has(k));
-      const missing = keys.filter(k => !morphs.has(k));
-      rows.push({ au, mapped: keys, present, missing });
-    });
-    // Summaries
-    const totalAUs = rows.length;
-    const fullCovered = rows.filter(r => r.missing.length === 0).length;
-    const partial = rows.filter(r => r.present.length > 0 && r.missing.length > 0).length;
-    const zero = rows.filter(r => r.present.length === 0).length;
-    console.groupCollapsed('%c[AU↔Morph Audit] GLB morph coverage vs ShapeDict', 'color:#8be9fd');
-    console.log('Morph count in GLB:', morphs.size);
-    console.log('AUs total:', totalAUs, '| fully covered:', fullCovered, '| partial:', partial, '| zero coverage:', zero);
-    console.table(rows.map(r => ({
-      AU: r.au,
-      mapped: r.mapped.join(', '),
-      present: r.present.join(', '),
-      missing: r.missing.join(', ')
-    })));
-    console.groupEnd();
-    return { morphCount: morphs.size, totalAUs, fullCovered, partial, zero };
-  }
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [animationReady, setAnimationReady] = useState(false);
 
   const handleReady = useCallback(
-    ({ meshes, model, animations, hairService, scene, renderer, skyboxTexture }: {
+    ({ meshes, model, scene, renderer, skyboxTexture }: {
       meshes: any[];
       model?: any;
-      animations?: any[];
-      hairService?: HairService;
       scene?: THREE.Scene;
       renderer?: THREE.WebGLRenderer;
       skyboxTexture?: THREE.Texture;
     }) => {
-      engine.onReady({ meshes, model, animations, scene, renderer, skyboxTexture });
+      mark('app-handleReady-start');
 
-      // Set hair service if available
-      if (hairService) {
-        setHairService(hairService);
-        // Expose hair service globally for debugging
-        if (typeof window !== 'undefined') {
-          (window as any).hairService = hairService;
-        }
-      }
+      mark('engine-onReady-start');
+      engine.onReady({ meshes, model, scene, renderer, skyboxTexture });
+      mark('engine-onReady-end');
+      measure('engine.onReady()', 'engine-onReady-start');
 
-      try {
-        const summary = auditMorphCoverage(model);
-        setAuditSummary(summary);
-      } catch {}
+      mark('anim-play-start');
       anim?.play?.();
+      mark('anim-play-end');
+      measure('anim.play()', 'anim-play-start');
+
       setIsLoading(false);
+      setAnimationReady(true);
+
+      mark('app-handleReady-end');
+      measure('App handleReady total', 'app-handleReady-start');
+
+      // Show toast after Chakra loads
+      getToaster().then(({ toaster }) => {
+        toaster.create({ title: 'Animation Ready', type: 'success', duration: 2000 });
+      });
     },
     [engine, anim]
   );
 
-  const handleProgress = useCallback((progress: number) => {
-    setLoadingProgress(progress);
+  const handleDrawerToggle = useCallback(() => {
+    setDrawerOpen(prev => !prev);
   }, []);
 
-  // Initialize GLB cache debug utilities
+  // Initialize eye/head tracking service when animation is ready
   useEffect(() => {
-    setupGLBCacheDebug();
-  }, []);
+    if (!engine || !anim || !animationReady) return;
 
-  // Initialize eye/head tracking service when both engine and anim are ready
-  useEffect(() => {
-    if (!engine || !anim) return;
-
-    console.log('[App] Creating eye/head tracking service with animation scheduler');
     const service = createEyeHeadTrackingService({
-      // Use default config - disabled by default, can be enabled in UI
-      animationAgency: anim, // Pass animation agency for scheduling approach
-      engine: engine, // Pass engine as fallback
+      animationAgency: anim,
+      engine: engine,
     });
 
     service.start();
     setEyeHeadTrackingService(service);
-    console.log('[App] ✓ Eye/head tracking service initialized (disabled by default)');
 
     return () => {
-      console.log('[App] Cleaning up eye/head tracking service');
       service.dispose();
       setEyeHeadTrackingService(null);
     };
-  }, [engine, anim, setEyeHeadTrackingService]);
-
-  // Initialize blink service when animation service is ready
-  useEffect(() => {
-    if (!anim) return;
-
-    console.log('[App] Creating blink service with animation scheduler');
-    const service = new BlinkService({
-      scheduleSnippet: (snippet: any) => {
-        return anim.schedule?.(snippet) || null;
-      },
-      removeSnippet: (name: string) => {
-        anim.remove?.(name);
-      },
-    });
-
-    setBlinkService(service);
-
-    // Expose blink service globally for debugging
-    if (typeof window !== 'undefined') {
-      (window as any).blinkService = service;
-    }
-
-    console.log('[App] ✓ Blink service initialized and registered');
-
-    return () => {
-      console.log('[App] Cleaning up blink service');
-      service.dispose();
-      setBlinkService(null);
-    };
-  }, [anim]);
+  }, [engine, anim, animationReady, setEyeHeadTrackingService]);
 
   // Camera override memoized
   const cameraOverride = useMemo(() => ({
@@ -164,30 +105,33 @@ function AppContent() {
 
   return (
     <div className="fullscreen-scene">
+      {/* Show black screen with loading text until ready - pure CSS, no Chakra */}
       <Preloader
         text="Loading Model"
-        progress={loadingProgress}
         show={isLoading}
-        skyboxUrl={skyboxUrl}
+        progress={loadProgress}
       />
 
+      {/* CharacterGLBScene handles its own visibility */}
       <CharacterGLBScene
         src={glbSrc}
         className="fullscreen-scene"
         cameraOverride={cameraOverride}
         skyboxUrl={skyboxUrl}
         onReady={handleReady}
-        onProgress={handleProgress}
+        onProgress={setLoadProgress}
       />
 
-      <SliderDrawer
-        isOpen={drawerOpen}
-        onToggle={() => setDrawerOpen(!drawerOpen)}
-        disabled={isLoading}
-        hairService={hairService}
-        blinkService={blinkService}
-      />
-      <ModulesMenu animationManager={anim} />
+      {/* Lazy load Chakra UI after animation is ready */}
+      {animationReady && (
+        <Suspense fallback={null}>
+          <ChakraUI
+            drawerOpen={drawerOpen}
+            onDrawerToggle={handleDrawerToggle}
+            animationManager={anim}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

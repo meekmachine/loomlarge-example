@@ -1,15 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import {
   VStack,
   Textarea,
   Button,
   HStack,
-  Select,
+  NativeSelect,
   Text,
   Slider,
-  SliderTrack,
-  SliderFilledTrack,
-  SliderThumb,
   Box,
   Badge,
 } from '@chakra-ui/react';
@@ -29,27 +26,8 @@ interface TTSSectionProps {
 
 /**
  * TTS Section - Text-to-Speech with integrated lip-sync and prosodic gestures
- *
- * Features:
- * - WebSpeech API for cross-platform text-to-speech
- * - Phoneme extraction → SAPI viseme mapping → ARKit morphs
- * - Animation service scheduling for smooth, wall-clock anchored playback
- * - Natural motion with easing curves (anticipation, overshoot, settle, decay)
- * - Coarticulation modeling (15% residual between adjacent visemes)
- * - Dynamic durations (vowels 150ms, consonants 80ms)
- * - Automatic neutral return at word boundaries and speech end
- * - Coordinated jaw movements (AU 26) with viseme shapes
- * - Optional prosodic gestures (brow raises every 3 words)
- *
- * Architecture:
- * 1. TTS service fires word boundary events
- * 2. LipSync service extracts phonemes → visemes for each word
- * 3. Build animation snippet with smooth curves for all visemes
- * 4. Schedule through animation service at priority 50 (high)
- * 5. Animation scheduler applies to ARKit morphs at 60fps
- * 6. Smooth return to neutral state after word/speech ends
  */
-export default function TTSSection({ engine, disabled = false, defaultExpanded = false }: TTSSectionProps) {
+function TTSSection({ engine, disabled = false, defaultExpanded = false }: TTSSectionProps) {
   const { anim } = useEngineState();
   const [text, setText] = useState('The saddest aspect of life right now is that science gathers knowledge faster than society gathers wisdom.');
   const [rate, setRate] = useState(1.0);
@@ -328,12 +306,12 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
 
   return (
     <DockableAccordionItem title="Text-to-Speech" isDefaultExpanded={defaultExpanded}>
-      <VStack spacing={4} mt={2} align="stretch">
+      <VStack gap={4} mt={2} align="stretch">
         {/* Status Badge */}
         <HStack>
           <Text fontSize="xs" fontWeight="bold">Status:</Text>
           <Badge
-            colorScheme={
+            colorPalette={
               status === 'speaking' ? 'green' :
               status === 'loading' ? 'yellow' :
               status === 'error' ? 'red' :
@@ -357,18 +335,18 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
         {/* Voice Selection */}
         <Box>
           <Text fontSize="xs" mb={1}>Voice</Text>
-          <Select
-            value={selectedVoice}
-            onChange={(e) => setSelectedVoice(e.target.value)}
-            size="sm"
-            disabled={disabled || isSpeaking}
-          >
-            {voices.map((voice) => (
-              <option key={voice.name} value={voice.name}>
-                {voice.name} ({voice.lang})
-              </option>
-            ))}
-          </Select>
+          <NativeSelect.Root size="sm" disabled={disabled || isSpeaking}>
+            <NativeSelect.Field
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+            >
+              {voices.map((voice) => (
+                <option key={voice.name} value={voice.name}>
+                  {voice.name} ({voice.lang})
+                </option>
+              ))}
+            </NativeSelect.Field>
+          </NativeSelect.Root>
         </Box>
 
         {/* Rate Control */}
@@ -377,19 +355,21 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
             <Text fontSize="xs">Rate</Text>
             <Text fontSize="xs" fontWeight="bold">{rate.toFixed(1)}x</Text>
           </HStack>
-          <Slider
-            value={rate}
-            onChange={setRate}
+          <Slider.Root
+            value={[rate]}
+            onValueChange={(details) => setRate(details.value[0])}
             min={0.5}
             max={2.0}
             step={0.1}
-            isDisabled={disabled || isSpeaking}
+            disabled={disabled || isSpeaking}
           >
-            <SliderTrack>
-              <SliderFilledTrack bg="teal.400" />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range style={{ background: 'var(--chakra-colors-teal-400)' }} />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
 
         {/* Pitch Control */}
@@ -398,19 +378,21 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
             <Text fontSize="xs">Pitch</Text>
             <Text fontSize="xs" fontWeight="bold">{pitch.toFixed(1)}</Text>
           </HStack>
-          <Slider
-            value={pitch}
-            onChange={setPitch}
+          <Slider.Root
+            value={[pitch]}
+            onValueChange={(details) => setPitch(details.value[0])}
             min={0.5}
             max={2.0}
             step={0.1}
-            isDisabled={disabled || isSpeaking}
+            disabled={disabled || isSpeaking}
           >
-            <SliderTrack>
-              <SliderFilledTrack bg="purple.400" />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range style={{ background: 'var(--chakra-colors-purple-400)' }} />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
 
         {/* Volume Control */}
@@ -419,19 +401,21 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
             <Text fontSize="xs">Volume</Text>
             <Text fontSize="xs" fontWeight="bold">{Math.round(volume * 100)}%</Text>
           </HStack>
-          <Slider
-            value={volume}
-            onChange={setVolume}
+          <Slider.Root
+            value={[volume]}
+            onValueChange={(details) => setVolume(details.value[0])}
             min={0}
             max={1.0}
             step={0.1}
-            isDisabled={disabled || isSpeaking}
+            disabled={disabled || isSpeaking}
           >
-            <SliderTrack>
-              <SliderFilledTrack bg="blue.400" />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range style={{ background: 'var(--chakra-colors-blue-400)' }} />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
 
         {/* Lipsync Intensity Control */}
@@ -440,19 +424,21 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
             <Text fontSize="xs">Lipsync Intensity</Text>
             <Text fontSize="xs" fontWeight="bold">{lipsyncIntensity.toFixed(1)}x</Text>
           </HStack>
-          <Slider
-            value={lipsyncIntensity}
-            onChange={setLipsyncIntensity}
+          <Slider.Root
+            value={[lipsyncIntensity]}
+            onValueChange={(details) => setLipsyncIntensity(details.value[0])}
             min={0}
             max={2.0}
             step={0.1}
-            isDisabled={disabled || isSpeaking}
+            disabled={disabled || isSpeaking}
           >
-            <SliderTrack>
-              <SliderFilledTrack bg="pink.400" />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range style={{ background: 'var(--chakra-colors-pink-400)' }} />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
 
         {/* Jaw Bone Activation Control */}
@@ -461,37 +447,39 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
             <Text fontSize="xs">Jaw Activation</Text>
             <Text fontSize="xs" fontWeight="bold">{jawScale.toFixed(1)}x</Text>
           </HStack>
-          <Slider
-            value={jawScale}
-            onChange={setJawScale}
+          <Slider.Root
+            value={[jawScale]}
+            onValueChange={(details) => setJawScale(details.value[0])}
             min={0}
             max={2.0}
             step={0.1}
-            isDisabled={disabled || isSpeaking}
+            disabled={disabled || isSpeaking}
           >
-            <SliderTrack>
-              <SliderFilledTrack bg="orange.400" />
-            </SliderTrack>
-            <SliderThumb />
-          </Slider>
+            <Slider.Control>
+              <Slider.Track>
+                <Slider.Range style={{ background: 'var(--chakra-colors-orange-400)' }} />
+              </Slider.Track>
+              <Slider.Thumb index={0} />
+            </Slider.Control>
+          </Slider.Root>
         </Box>
 
         {/* Control Buttons */}
-        <HStack spacing={2}>
+        <HStack gap={2}>
           <Button
             onClick={handleSpeak}
-            colorScheme="teal"
+            colorPalette="teal"
             size="sm"
-            isDisabled={disabled || isSpeaking || !text.trim()}
+            disabled={disabled || isSpeaking || !text.trim()}
             flex={1}
           >
             Speak
           </Button>
           <Button
             onClick={handleStop}
-            colorScheme="red"
+            colorPalette="red"
             size="sm"
-            isDisabled={disabled || !isSpeaking}
+            disabled={disabled || !isSpeaking}
             flex={1}
           >
             Stop
@@ -506,3 +494,5 @@ export default function TTSSection({ engine, disabled = false, defaultExpanded =
     </DockableAccordionItem>
   );
 }
+
+export default memo(TTSSection);

@@ -42,8 +42,12 @@ export interface Engine {
   /**
    * Apply AU value immediately (no transition)
    * Used for instant updates or when transition timing is handled elsewhere
+   *
+   * @param id - AU number or string (e.g., 12 or '12')
+   * @param value - Target value in [0, 1]
+   * @param balance - Optional L/R balance: -1 = left only, 0 = both, +1 = right only
    */
-  applyAU: (id: number | string, value: number) => void;
+  applyAU: (id: number | string, value: number, balance?: number) => void;
 
   /**
    * Apply morph value immediately (no transition)
@@ -68,23 +72,10 @@ export interface Engine {
    * @param id - AU number (e.g., 12 for lip corner puller)
    * @param value - Target value in [0, 1]
    * @param durationMs - Transition duration in milliseconds (default: 120ms)
+   * @param balance - Optional L/R balance: -1 = left only, 0 = both, +1 = right only
    * @returns TransitionHandle with { promise, pause, resume, cancel }
    */
-  transitionAU?: (id: number | string, value: number, durationMs?: number) => TransitionHandle;
-
-  /**
-   * OPTIMIZED: Transition AU value with pre-resolved targets
-   * Resolves morph indices and bone references once at creation time,
-   * then applies values directly each tick without lookups.
-   *
-   * Use this for performance-critical transitions (e.g., eye/head tracking)
-   *
-   * @param id - AU number (e.g., 12 for lip corner puller)
-   * @param value - Target value in [0, 1]
-   * @param durationMs - Transition duration in milliseconds (default: 200ms)
-   * @returns TransitionHandle with { promise, pause, resume, cancel }
-   */
-  transitionAUOptimized?: (id: number | string, value: number, durationMs?: number) => TransitionHandle;
+  transitionAU?: (id: number | string, value: number, durationMs?: number, balance?: number) => TransitionHandle;
 
   /**
    * Transition morph value smoothly over duration

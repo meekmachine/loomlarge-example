@@ -21,7 +21,7 @@ Create a flexible realtime 3D character platform that can render complex persona
   - Implement runtime loader that configures behaviors per agent; expose overrides via query params/URL config.
 - **Agency Orchestration Hooks**
   - Align with existing agencies in the repo, defining lifecycle events (onSceneEnter, onCue, onToolInvoke).
-  - Add instrumentation/logging for agency decisions (glbCacheDebug style UI overlay).
+  - Add instrumentation/logging for agency decisions (debug UI overlay).
 - **Python Backend Bootstrap**
   - Stand up FastAPI project with endpoints for persona config, scene state, and LiveKit session management.
   - Implement LiveKit signaling helpers to broadcast state changes to FE.

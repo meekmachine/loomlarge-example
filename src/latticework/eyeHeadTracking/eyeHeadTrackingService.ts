@@ -20,6 +20,11 @@ import {
   type EyeHeadTrackingMachineContext,
 } from './eyeHeadTrackingMachine';
 
+// Declare global BlazeFace from CDN
+declare const blazeface: {
+  load: () => Promise<any>;
+};
+
 export class EyeHeadTrackingService {
   private config: EyeHeadTrackingConfig;
   private state: EyeHeadTrackingState;
@@ -37,9 +42,18 @@ export class EyeHeadTrackingService {
   // Tracking mode
   private trackingMode: 'manual' | 'mouse' | 'webcam' = 'manual';
   private mouseListener: ((e: MouseEvent) => void) | null = null;
-  private webcamTracking: any = null; // Webcam tracking instance
   private machine: ReturnType<typeof createActor<EyeHeadTrackingMachine>> | null = null;
   private filteredGaze: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
+  private lastMouseUpdate: number = 0;
+
+  // Webcam tracking state (internal - no React hooks)
+  private webcamModel: any = null;
+  private webcamStream: MediaStream | null = null;
+  private webcamVideo: HTMLVideoElement | null = null;
+  private webcamRafId: number | null = null;
+  private webcamFaceDetected: boolean = false;
+  private webcamListeners: Set<(detected: boolean, landmarks?: Array<{ x: number; y: number }>) => void> = new Set();
+  private lastWebcamUpdate: number = 0;
 
   constructor(
     config: EyeHeadTrackingConfig = {},
@@ -410,16 +424,18 @@ export class EyeHeadTrackingService {
         return;
       }
 
+      // Throttle to ~60fps (16ms)
+      const now = performance.now();
+      if (now - this.lastMouseUpdate < 16) return;
+      this.lastMouseUpdate = now;
+
       // Convert mouse position to normalized coordinates (-1 to 1)
       // Negate x for mirror behavior: mouse left → character looks right (at the user)
       const x = -((e.clientX / window.innerWidth) * 2 - 1);
       const y = -((e.clientY / window.innerHeight) * 2 - 1);
 
-      // Update gaze but don't schedule return to neutral (continuous tracking)
-      this.state.targetGaze = { x, y, z: 0 };
-      this.state.lastGazeUpdateTime = Date.now();
-      this.applyGazeToCharacter({ x, y, z: 0 });
-      this.callbacks.onGazeChange?.({ x, y, z: 0 });
+      // Use setGazeTarget which respects useAnimationAgency toggle
+      this.setGazeTarget({ x, y, z: 0 });
     };
 
     window.addEventListener('mousemove', this.mouseListener);
@@ -436,28 +452,186 @@ export class EyeHeadTrackingService {
   }
 
   /**
-   * Start webcam tracking
+   * Start webcam tracking - loads model, starts camera, runs detection loop
    */
-  private startWebcamTracking(): void {
-    // Webcam tracking will be initialized externally via setWebcamTracking()
-    // Webcam tracking will be initialized externally via setWebcamTracking()
+  private async startWebcamTracking(): Promise<void> {
+    // Load BlazeFace model if not already loaded
+    if (!this.webcamModel) {
+      try {
+        if (typeof blazeface === 'undefined') {
+          console.error('[EyeHeadTracking] BlazeFace not loaded from CDN');
+          return;
+        }
+        console.log('[EyeHeadTracking] Loading BlazeFace model...');
+        this.webcamModel = await blazeface.load();
+        console.log('[EyeHeadTracking] BlazeFace model loaded');
+      } catch (err) {
+        console.error('[EyeHeadTracking] Failed to load BlazeFace:', err);
+        return;
+      }
+    }
+
+    // Start webcam stream
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        console.error('[EyeHeadTracking] getUserMedia not supported');
+        return;
+      }
+
+      this.webcamStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, facingMode: 'user' },
+      });
+
+      // Create hidden video element
+      this.webcamVideo = document.createElement('video');
+      this.webcamVideo.srcObject = this.webcamStream;
+      this.webcamVideo.width = 640;
+      this.webcamVideo.height = 480;
+      this.webcamVideo.autoplay = true;
+      this.webcamVideo.playsInline = true;
+      this.webcamVideo.muted = true;
+
+      await new Promise<void>((resolve) => {
+        this.webcamVideo!.onloadedmetadata = () => resolve();
+      });
+      await this.webcamVideo.play();
+
+      console.log('[EyeHeadTracking] Webcam started');
+
+      // Start detection loop using RAF (no setInterval)
+      this.runWebcamDetectionLoop();
+    } catch (err) {
+      console.error('[EyeHeadTracking] Failed to start webcam:', err);
+    }
+  }
+
+  /**
+   * Run webcam face detection in RAF loop (throttled to ~30fps)
+   */
+  private runWebcamDetectionLoop(): void {
+    if (!this.webcamVideo || !this.webcamModel || this.trackingMode !== 'webcam') {
+      return;
+    }
+
+    const detect = async () => {
+      if (!this.webcamVideo || !this.webcamModel || this.trackingMode !== 'webcam') {
+        return;
+      }
+
+      // Throttle to ~30fps (33ms)
+      const now = performance.now();
+      if (now - this.lastWebcamUpdate < 33) {
+        this.webcamRafId = requestAnimationFrame(detect);
+        return;
+      }
+      this.lastWebcamUpdate = now;
+
+      try {
+        const predictions = await this.webcamModel.estimateFaces(this.webcamVideo, false);
+
+        if (predictions && predictions.length > 0) {
+          const face = predictions[0];
+          const width = this.webcamVideo.width;
+          const height = this.webcamVideo.height;
+
+          // BlazeFace landmarks: leftEye, rightEye, nose, mouth, leftEar, rightEar
+          const landmarks = face.landmarks.map((point: number[]) => ({
+            x: point[0] / width,
+            y: point[1] / height,
+          }));
+
+          // Calculate gaze from eye positions
+          const leftEye = landmarks[0];
+          const rightEye = landmarks[1];
+          const avgX = (leftEye.x + rightEye.x) / 2;
+          const avgY = (leftEye.y + rightEye.y) / 2;
+
+          // Convert to -1 to 1 range
+          const gazeX = avgX * 2 - 1;
+          const gazeY = -(avgY * 2 - 1);
+
+          // Use setGazeTarget which respects useAnimationAgency toggle
+          this.setGazeTarget({ x: gazeX, y: gazeY, z: 0 });
+
+          // Notify listeners if face detection status changed
+          if (!this.webcamFaceDetected) {
+            this.webcamFaceDetected = true;
+            this.notifyWebcamListeners(true, landmarks);
+          }
+        } else {
+          if (this.webcamFaceDetected) {
+            this.webcamFaceDetected = false;
+            this.notifyWebcamListeners(false);
+          }
+        }
+      } catch (err) {
+        // Silently ignore detection errors
+      }
+
+      // Continue loop
+      this.webcamRafId = requestAnimationFrame(detect);
+    };
+
+    this.webcamRafId = requestAnimationFrame(detect);
   }
 
   /**
    * Stop webcam tracking
    */
   private stopWebcamTracking(): void {
-    if (this.webcamTracking?.stop) {
-      this.webcamTracking.stop();
-      this.webcamTracking = null;
+    // Cancel detection loop
+    if (this.webcamRafId !== null) {
+      cancelAnimationFrame(this.webcamRafId);
+      this.webcamRafId = null;
     }
+
+    // Stop media stream tracks
+    if (this.webcamStream) {
+      this.webcamStream.getTracks().forEach(track => track.stop());
+      this.webcamStream = null;
+    }
+
+    // Clean up video element
+    if (this.webcamVideo) {
+      this.webcamVideo.srcObject = null;
+      this.webcamVideo = null;
+    }
+
+    this.webcamFaceDetected = false;
+    this.notifyWebcamListeners(false);
   }
 
   /**
-   * Set webcam tracking instance (called externally by UI)
+   * Subscribe to webcam detection updates (for UI to show face status)
    */
-  public setWebcamTracking(webcamInstance: any): void {
-    this.webcamTracking = webcamInstance;
+  public subscribeToWebcam(callback: (detected: boolean, landmarks?: Array<{ x: number; y: number }>) => void): () => void {
+    this.webcamListeners.add(callback);
+    // Immediately notify current state
+    callback(this.webcamFaceDetected);
+    return () => {
+      this.webcamListeners.delete(callback);
+    };
+  }
+
+  /**
+   * Get current webcam video element (for UI preview)
+   */
+  public getWebcamVideoElement(): HTMLVideoElement | null {
+    return this.webcamVideo;
+  }
+
+  /**
+   * Check if webcam is actively tracking
+   */
+  public isWebcamActive(): boolean {
+    return this.trackingMode === 'webcam' && this.webcamVideo !== null;
+  }
+
+  /**
+   * Notify webcam listeners of detection status change
+   */
+  private notifyWebcamListeners(detected: boolean, landmarks?: Array<{ x: number; y: number }>): void {
+    this.webcamListeners.forEach(cb => cb(detected, landmarks));
   }
 
   /**
@@ -479,7 +653,7 @@ export class EyeHeadTrackingService {
    */
   private applyGazeToCharacter(
     target: GazeTarget,
-    options?: { applyEyes?: boolean; applyHead?: boolean }
+    options?: { applyEyes?: boolean; applyHead?: boolean; skipMachine?: boolean }
   ): void {
     // Early return if both eye and head tracking are disabled (already checked in setGazeTarget, but double-check)
     if (!this.config.eyeTrackingEnabled && !this.config.headTrackingEnabled) {
@@ -584,10 +758,14 @@ export class EyeHeadTrackingService {
     // Update current gaze position for next distance calculation (use adjusted coordinates)
     this.filteredGaze = smoothedTarget;
     this.state.currentGaze = smoothedTarget;
-    this.machine?.send({
-      type: 'SET_STATUS',
-      lastApplied: this.state.currentGaze,
-    });
+
+    // Skip machine updates for continuous tracking (mouse/webcam) to avoid overhead
+    if (!options?.skipMachine) {
+      this.machine?.send({
+        type: 'SET_STATUS',
+        lastApplied: this.state.currentGaze,
+      });
+    }
   }
 
   /**
