@@ -5,7 +5,7 @@
 
 import { PhonemeExtractor } from './PhonemeExtractor';
 import { VisemeMapper } from './VisemeMapper';
-import { getARKitVisemeKey, getARKitVisemeIndex, getJawAmountForViseme } from './visemeToARKit';
+import { VISEME_KEYS } from '../../engine/arkit/shapeDict';
 
 export interface TestResult {
   passed: boolean;
@@ -81,29 +81,30 @@ export function createLipSyncTestSuite(): LipSyncTestSuite {
 
   /**
    * Test viseme mapping accuracy
+   * VisemeMapper now returns ARKit indices directly (0-14)
    */
   function testVisemeMapping(): TestResult[] {
     const results: TestResult[] = [];
 
-    // Test 1: Vowel phonemes map to correct visemes
+    // Test 1: Vowel phonemes map to valid ARKit indices (0-14)
     const vowelPhonemes = ['AE', 'AA', 'IY', 'UW', 'OW'];
     const vowelTests = vowelPhonemes.map(phoneme => {
       const mapping = visemeMapper.getVisemeAndDuration(phoneme);
       return {
-        passed: mapping.viseme >= 1 && mapping.viseme <= 11,
-        message: `Vowel ${phoneme} maps to viseme ${mapping.viseme}`,
+        passed: mapping.viseme >= 0 && mapping.viseme <= 14,
+        message: `Vowel ${phoneme} maps to ARKit viseme ${mapping.viseme} (${VISEME_KEYS[mapping.viseme]})`,
         details: mapping
       };
     });
     results.push(...vowelTests);
 
-    // Test 2: Consonant phonemes map correctly
+    // Test 2: Consonant phonemes map to valid ARKit indices
     const consonantPhonemes = ['P', 'B', 'M', 'S', 'Z', 'T', 'D'];
     const consonantTests = consonantPhonemes.map(phoneme => {
       const mapping = visemeMapper.getVisemeAndDuration(phoneme);
       return {
-        passed: mapping.viseme >= 12 && mapping.viseme <= 21,
-        message: `Consonant ${phoneme} maps to viseme ${mapping.viseme}`,
+        passed: mapping.viseme >= 0 && mapping.viseme <= 14,
+        message: `Consonant ${phoneme} maps to ARKit viseme ${mapping.viseme} (${VISEME_KEYS[mapping.viseme]})`,
         details: mapping
       };
     });
@@ -118,11 +119,11 @@ export function createLipSyncTestSuite(): LipSyncTestSuite {
       details: { vowelDuration, consonantDuration }
     });
 
-    // Test 4: Pause tokens
+    // Test 4: Pause tokens map to B_M_P (closed mouth, index 11)
     const pauseMapping = visemeMapper.getVisemeAndDuration('PAUSE_COMMA');
     results.push({
-      passed: pauseMapping.viseme === 0 && pauseMapping.duration > 0,
-      message: 'Pause tokens map to silence with duration',
+      passed: pauseMapping.viseme === 11 && pauseMapping.duration > 0,
+      message: 'Pause tokens map to B_M_P (closed mouth) with duration',
       details: pauseMapping
     });
 
@@ -130,38 +131,36 @@ export function createLipSyncTestSuite(): LipSyncTestSuite {
   }
 
   /**
-   * Test ARKit conversion and jaw mapping
+   * Test ARKit viseme mapping
+   * VisemeMapper now outputs ARKit indices directly - no conversion needed
    */
   function testARKitConversion(): TestResult[] {
     const results: TestResult[] = [];
 
-    // Test 1: All SAPI visemes map to valid ARKit indices
-    for (let sapiId = 0; sapiId <= 21; sapiId++) {
-      const arkitIndex = getARKitVisemeIndex(sapiId);
-      const arkitKey = getARKitVisemeKey(sapiId);
-      const jawAmount = getJawAmountForViseme(sapiId);
-
+    // Test 1: All ARKit viseme indices have valid keys
+    for (let arkitIndex = 0; arkitIndex <= 14; arkitIndex++) {
+      const arkitKey = VISEME_KEYS[arkitIndex];
       results.push({
-        passed: arkitIndex >= 0 && arkitIndex <= 14 && jawAmount >= 0 && jawAmount <= 1,
-        message: `SAPI ${sapiId} → ARKit index ${arkitIndex} (${arkitKey}), jaw ${jawAmount.toFixed(2)}`,
-        details: { sapiId, arkitIndex, arkitKey, jawAmount }
+        passed: arkitKey !== undefined && arkitKey.length > 0,
+        message: `ARKit index ${arkitIndex} → ${arkitKey}`,
+        details: { arkitIndex, arkitKey }
       });
     }
 
-    // Test 2: Bilabial consonants (P, B, M) have minimal jaw
-    const bilabialJaw = getJawAmountForViseme(21); // P-B-M
+    // Test 2: Bilabial consonants (P, B, M) map to B_M_P (index 11)
+    const bilabialMapping = visemeMapper.getVisemeAndDuration('P');
     results.push({
-      passed: bilabialJaw === 0,
-      message: 'Bilabial consonants (P, B, M) have zero jaw activation',
-      details: { bilabialJaw }
+      passed: bilabialMapping.viseme === 11, // B_M_P
+      message: 'Bilabial consonants (P, B, M) map to B_M_P (closed mouth)',
+      details: { viseme: bilabialMapping.viseme, key: VISEME_KEYS[bilabialMapping.viseme] }
     });
 
-    // Test 3: Open vowels (AA) have maximum jaw
-    const openVowelJaw = getJawAmountForViseme(2); // AA
+    // Test 3: Open vowels (AA) map to Ah (index 3)
+    const openVowelMapping = visemeMapper.getVisemeAndDuration('AA');
     results.push({
-      passed: openVowelJaw >= 0.8,
-      message: 'Open vowels (AA) have high jaw activation',
-      details: { openVowelJaw }
+      passed: openVowelMapping.viseme === 3, // Ah
+      message: 'Open vowels (AA) map to Ah (wide mouth)',
+      details: { viseme: openVowelMapping.viseme, key: VISEME_KEYS[openVowelMapping.viseme] }
     });
 
     return results;
@@ -236,26 +235,27 @@ export function createLipSyncTestSuite(): LipSyncTestSuite {
       details: { mapTime, visemeCount: visemes.length }
     });
 
-    // Test 3: ARKit conversion performance
-    const arkitStartTime = performance.now();
+    // Test 3: Viseme key lookup performance
+    const keyLookupStartTime = performance.now();
     visemes.forEach(v => {
-      getARKitVisemeIndex(v.viseme);
-      getJawAmountForViseme(v.viseme);
+      const key = VISEME_KEYS[v.viseme];
+      // Verify key exists
+      if (!key) throw new Error(`Invalid viseme index: ${v.viseme}`);
     });
-    const arkitTime = performance.now() - arkitStartTime;
+    const keyLookupTime = performance.now() - keyLookupStartTime;
 
     results.push({
-      passed: arkitTime < 10, // Should complete in < 10ms
-      message: `ARKit conversion performance: ${arkitTime.toFixed(2)}ms for ${visemes.length} conversions`,
-      details: { arkitTime, conversionCount: visemes.length }
+      passed: keyLookupTime < 10, // Should complete in < 10ms
+      message: `Viseme key lookup performance: ${keyLookupTime.toFixed(2)}ms for ${visemes.length} lookups`,
+      details: { keyLookupTime, lookupCount: visemes.length }
     });
 
     // Test 4: Total latency
-    const totalLatency = extractTime + mapTime + arkitTime;
+    const totalLatency = extractTime + mapTime + keyLookupTime;
     results.push({
       passed: totalLatency < 100, // Total should be < 100ms
       message: `Total lip-sync latency: ${totalLatency.toFixed(2)}ms (target: <100ms)`,
-      details: { totalLatency, breakdown: { extractTime, mapTime, arkitTime } }
+      details: { totalLatency, breakdown: { extractTime, mapTime, keyLookupTime } }
     });
 
     return results;

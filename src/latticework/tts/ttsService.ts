@@ -19,7 +19,6 @@ import {
   decodeBase64Audio,
   getTimelineDuration
 } from './utils';
-import { getARKitVisemeIndex } from '../lipsync/visemeToARKit';
 
 export class TTSService {
   private config: Required<TTSConfig>;
@@ -414,13 +413,13 @@ export class TTSService {
       const lipsyncIntensity = 1.0;
 
       visemeTimeline.forEach((visemeEvent: any) => {
-        const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
-        const visemeId = arkitIndex.toString();
+        // visemeEvent.visemeId is now already the ARKit index (0-14)
+        const visemeId = visemeEvent.visemeId.toString();
         const timeInSec = visemeEvent.offsetMs / 1000;
         const durationInSec = visemeEvent.durationMs / 1000;
 
-        // Skip silence visemes (SAPI 0)
-        if (visemeEvent.visemeId === 0) return;
+        // Skip silence visemes (B_M_P = index 11)
+        if (visemeEvent.visemeId === 11) return;
 
         // Smooth coarticulation timing
         const rampUp = Math.max(0.025, durationInSec * 0.3);

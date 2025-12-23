@@ -15,7 +15,6 @@ import type { ConversationFlow } from '../../latticework/conversation/types';
 import { frenchQuestions } from './frenchQuestions';
 import WelcomeModal from './WelcomeModal';
 import FinishModal from './FinishModal';
-import { getJawAmountForViseme, getARKitVisemeIndex } from '../../latticework/lipsync/visemeToARKit';
 import { useModulesContext } from '../../context/ModulesContext';
 
 interface FrenchQuizAppProps {

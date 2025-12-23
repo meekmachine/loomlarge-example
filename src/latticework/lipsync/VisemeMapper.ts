@@ -1,104 +1,69 @@
 /**
  * VisemeMapper
- * Maps phonemes to Microsoft SAPI viseme IDs (0-21)
- * Based on CMU phoneme set and SAPI viseme specification
+ * Maps phonemes directly to ARKit viseme indices (0-14)
+ *
+ * ARKit VISEME_KEYS (indices 0-14):
+ * 0: EE, 1: Er, 2: IH, 3: Ah, 4: Oh, 5: W_OO, 6: S_Z, 7: Ch_J,
+ * 8: F_V, 9: TH, 10: T_L_D_N, 11: B_M_P, 12: K_G_H_NG, 13: AE, 14: R
  */
 
 import type { VisemeID, PhonemeMapping } from './types';
 
 /**
- * Phoneme to Viseme mapping table
- * Based on Microsoft SAPI viseme specification
+ * Phoneme to ARKit Viseme Index mapping table
+ * Maps directly to ARKit indices (0-14) - no SAPI conversion needed
  */
 const PHONEME_TO_VISEME_MAP: Record<string, VisemeID> = {
-  // Silence
-  'sil': 0,
-  'pau': 0,
-  'PAUSE': 0,
+  // Silence - maps to B_M_P (closed mouth)
+  'sil': 11,
+  'pau': 11,
+  'PAUSE': 11,
 
-  // Viseme 1: AE, AX, AH
-  'AE': 1,
-  'AX': 1,
-  'AH': 1,
+  // Vowels
+  'AE': 13,     // → AE (cat, bat)
+  'AX': 3,      // → Ah (neutral schwa)
+  'AH': 3,      // → Ah (father, cup)
+  'AA': 3,      // → Ah (father)
+  'AO': 4,      // → Oh (law, caught)
+  'EY': 0,      // → EE (bait, say)
+  'EH': 0,      // → EE (bet, head)
+  'UH': 4,      // → Oh (book, put)
+  'ER': 1,      // → Er (bird, her)
+  'Y': 2,       // → IH (yes - onset)
+  'IY': 2,      // → IH (bee, heat)
+  'IH': 2,      // → IH (bit, happy)
+  'IX': 2,      // → IH (roses)
+  'W': 5,       // → W_OO (wet)
+  'UW': 5,      // → W_OO (boot, blue)
+  'OW': 4,      // → Oh (go, boat)
+  'AW': 3,      // → Ah (cow)
+  'OY': 4,      // → Oh (boy)
+  'AY': 3,      // → Ah (eye, my)
 
-  // Viseme 2: AA
-  'AA': 2,
-
-  // Viseme 3: AO
-  'AO': 3,
-
-  // Viseme 4: EY, EH, UH
-  'EY': 4,
-  'EH': 4,
-  'UH': 4,
-
-  // Viseme 5: ER
-  'ER': 5,
-
-  // Viseme 6: Y, IY, IH, IX
-  'Y': 6,
-  'IY': 6,
-  'IH': 6,
-  'IX': 6,
-
-  // Viseme 7: W, UW
-  'W': 7,
-  'UW': 7,
-
-  // Viseme 8: OW
-  'OW': 8,
-
-  // Viseme 9: AW
-  'AW': 9,
-
-  // Viseme 10: OY
-  'OY': 10,
-
-  // Viseme 11: AY
-  'AY': 11,
-
-  // Viseme 12: H
-  'H': 12,
-  'HH': 12,
-
-  // Viseme 13: R
-  'R': 13,
-
-  // Viseme 14: L
-  'L': 14,
-
-  // Viseme 15: S, Z
-  'S': 15,
-  'Z': 15,
-
-  // Viseme 16: SH, CH, JH, ZH
-  'SH': 16,
-  'CH': 16,
-  'JH': 16,
-  'ZH': 16,
-
-  // Viseme 17: TH, DH
-  'TH': 17,
-  'DH': 17,
-
-  // Viseme 18: F, V
-  'F': 18,
-  'V': 18,
-
-  // Viseme 19: D, T, N
-  'D': 19,
-  'T': 19,
-  'N': 19,
-
-  // Viseme 20: K, G, NG
-  'K': 20,
-  'G': 20,
-  'NG': 20,
-
-  // Viseme 21: P, B, M
-  'P': 21,
-  'B': 21,
-  'M': 21,
+  // Consonants
+  'H': 3,       // → Ah (hat - open glottal)
+  'HH': 3,      // → Ah (hat)
+  'R': 14,      // → R (red)
+  'L': 10,      // → T_L_D_N (like)
+  'S': 6,       // → S_Z (see)
+  'Z': 6,       // → S_Z (zoo)
+  'SH': 7,      // → Ch_J (shoe)
+  'CH': 7,      // → Ch_J (church)
+  'JH': 7,      // → Ch_J (judge)
+  'ZH': 7,      // → Ch_J (measure)
+  'TH': 9,      // → TH (think)
+  'DH': 9,      // → TH (this)
+  'F': 8,       // → F_V (fish)
+  'V': 8,       // → F_V (very)
+  'D': 10,      // → T_L_D_N (dog)
+  'T': 10,      // → T_L_D_N (top)
+  'N': 10,      // → T_L_D_N (now)
+  'K': 12,      // → K_G_H_NG (cat)
+  'G': 12,      // → K_G_H_NG (go)
+  'NG': 12,     // → K_G_H_NG (sing)
+  'P': 11,      // → B_M_P (put)
+  'B': 11,      // → B_M_P (boy)
+  'M': 11,      // → B_M_P (mom)
 };
 
 /**
@@ -108,7 +73,6 @@ const PHONEME_TO_VISEME_MAP: Record<string, VisemeID> = {
  */
 const DEFAULT_VOWEL_DURATION = 120; // Reduced from 150 for faster speech
 const DEFAULT_CONSONANT_DURATION = 60; // Reduced from 80 for quicker consonants
-const DEFAULT_PAUSE_DURATION = 80;
 
 /**
  * Special pause durations based on punctuation
@@ -129,12 +93,12 @@ export class VisemeMapper {
    * Map a single phoneme to its viseme ID and duration
    */
   public getVisemeAndDuration(phoneme: string): PhonemeMapping {
-    // Handle pause tokens
+    // Handle pause tokens - return B_M_P (closed mouth)
     if (phoneme.startsWith('PAUSE_')) {
       const duration = PAUSE_DURATIONS[phoneme] || 300;
       return {
         phoneme,
-        viseme: 0, // Silence viseme
+        viseme: 11, // B_M_P (closed mouth)
         duration,
       };
     }
@@ -142,7 +106,7 @@ export class VisemeMapper {
     // Normalize phoneme (uppercase, remove stress markers)
     const normalizedPhoneme = phoneme.toUpperCase().replace(/[0-9]/g, '');
 
-    const visemeId = PHONEME_TO_VISEME_MAP[normalizedPhoneme] ?? 0;
+    const visemeId = PHONEME_TO_VISEME_MAP[normalizedPhoneme] ?? 11; // Default to B_M_P (closed)
 
     // Determine duration based on whether it's a vowel or consonant
     const isVowelPhoneme = this.isVowel(normalizedPhoneme);
@@ -174,10 +138,15 @@ export class VisemeMapper {
    */
   public isVowel(phoneme: string): boolean {
     const normalizedPhoneme = phoneme.toUpperCase().replace(/[0-9]/g, '');
-    const visemeId = PHONEME_TO_VISEME_MAP[normalizedPhoneme];
-
-    // Visemes 1-11 are vowels/diphthongs
-    return visemeId !== undefined && visemeId >= 1 && visemeId <= 11;
+    // Vowel phonemes (CMU set)
+    const vowels = new Set([
+      'AA', 'AE', 'AH', 'AO', 'AW', 'AX', 'AY',
+      'EH', 'ER', 'EY',
+      'IH', 'IX', 'IY',
+      'OW', 'OY',
+      'UH', 'UW'
+    ]);
+    return vowels.has(normalizedPhoneme);
   }
 
   /**

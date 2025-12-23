@@ -75,7 +75,8 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
   const continuumKey = `${negId}-${posId}`;
   const headerLabel = CONTINUUM_LABELS[continuumKey] ?? `AU ${negId} ↔ AU ${posId}`;
 
-  // Handle slider change - calls engine.setContinuum directly
+  // Handle slider change - calls setAU for ONE AU only
+  // (Calling both would overwrite the bone since they share the same axis)
   const handleSliderChange = (details: { value: number[] }) => {
     const val = details.value[0];
     setValue(val);
@@ -83,7 +84,18 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
     // Notify parent if callback provided
     onValueChangeRef.current?.(negativeAU.id, positiveAU.id, val);
 
-    engine?.setContinuum(negId, posId, val);
+    if (!engine) return;
+
+    if (val < 0) {
+      // Negative direction: activate negAU only
+      engine.setAU(negId, Math.abs(val));
+    } else if (val > 0) {
+      // Positive direction: activate posAU only
+      engine.setAU(posId, val);
+    } else {
+      // Zero: set one AU to 0 (either works, they share the bone)
+      engine.setAU(posId, 0);
+    }
   };
 
   // Determine which AU is the "base" for mix weight:

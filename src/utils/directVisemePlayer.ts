@@ -8,7 +8,6 @@
 import type { EngineThree } from '../engine/EngineThree';
 import { phonemeExtractor } from '../latticework/lipsync/PhonemeExtractor';
 import { visemeMapper } from '../latticework/lipsync/VisemeMapper';
-import { getARKitVisemeIndex } from '../latticework/lipsync/visemeToARKit';
 
 export interface VisemePlayerConfig {
   /** Overall intensity (0-1), default 0.8 */
@@ -115,11 +114,11 @@ export class DirectVisemePlayer {
     for (const phoneme of phonemes) {
       const mapping = visemeMapper.getVisemeAndDuration(phoneme);
       const durationMs = visemeMapper.adjustDuration(mapping.duration, this.config.speechRate);
-      const arkitIndex = getARKitVisemeIndex(mapping.viseme);
-      const isSilence = mapping.viseme === 0;
+      // mapping.viseme is now already the ARKit index (0-14)
+      const isSilence = mapping.viseme === 11; // B_M_P (closed mouth)
 
       events.push({
-        arkitIndex,
+        arkitIndex: mapping.viseme,
         durationMs,
         isSilence,
       });

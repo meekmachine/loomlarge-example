@@ -12,18 +12,12 @@ import { SepiaShader } from 'three/examples/jsm/shaders/SepiaShader.js';
 import {
   AU_TO_MORPHS,
   BONE_AU_TO_BINDINGS,
-  COMPOSITE_ROTATIONS,
   AU_MIX_DEFAULTS,
   CC4_BONE_NODES,
   CC4_EYE_MESH_NODES,
   CC4_MESHES,
-  CONTINUUM_PAIRS_MAP,
-  EYE_AXIS,
   VISEME_KEYS,
-  type CompositeRotation,
 } from './arkit/shapeDict';
-import { createAnimationService } from '../latticework/animation/animationService';
-import type { Engine } from './EngineThree.types';
 
 // Post-processing effect types
 export type PostEffect =
@@ -73,8 +67,6 @@ export const DEFAULT_EFFECT_PARAMS: EffectParams = {
 /** All AU IDs that have bone bindings */
 export const BONE_DRIVEN_AUS = new Set(Object.keys(BONE_AU_TO_BINDINGS).map(Number));
 
-// Re-export from shapeDict for backwards compatibility
-export { EYE_AXIS, CONTINUUM_PAIRS_MAP };
 
 /** AUs that have both morphs and bones - can blend between them */
 export const MIXED_AUS = new Set(
@@ -83,68 +75,11 @@ export const MIXED_AUS = new Set(
     .filter(id => AU_TO_MORPHS[id]?.length && BONE_AU_TO_BINDINGS[id]?.length)
 );
 
-/** Map AU ID to which composite rotation it belongs to, and which axis */
-export const AU_TO_COMPOSITE_MAP = new Map<number, {
-  nodes: CompositeRotation['node'][];
-  axis: 'pitch' | 'yaw' | 'roll';
-}>();
-
-// Build the reverse mapping from COMPOSITE_ROTATIONS
-COMPOSITE_ROTATIONS.forEach(comp => {
-  (['pitch', 'yaw', 'roll'] as const).forEach(axisName => {
-    const axis = comp[axisName];
-    if (axis) {
-      axis.aus.forEach(auId => {
-        const existing = AU_TO_COMPOSITE_MAP.get(auId);
-        if (existing) {
-          existing.nodes.push(comp.node);
-        } else {
-          AU_TO_COMPOSITE_MAP.set(auId, { nodes: [comp.node], axis: axisName });
-        }
-      });
-    }
-  });
-});
-
-/** Continuum pairs derived from COMPOSITE_ROTATIONS for UI sliders */
-export const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBlend: boolean }> = (() => {
-  const seen = new Set<string>();
-  const pairs: Array<{ negative: number; positive: number; showBlend: boolean }> = [];
-  // Add bone-driven continuum pairs from COMPOSITE_ROTATIONS
-  for (const comp of COMPOSITE_ROTATIONS) {
-    for (const axisName of ['pitch', 'yaw', 'roll'] as const) {
-      const axis = comp[axisName];
-      if (axis?.negative !== undefined && axis?.positive !== undefined) {
-        const key = `${axis.negative}-${axis.positive}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          pairs.push({ negative: axis.negative, positive: axis.positive, showBlend: true });
-        }
-      }
-    }
-  }
-  // Add morph-only continuum pairs from CONTINUUM_PAIRS_MAP (e.g., tongue morphs)
-  for (const [auIdStr, info] of Object.entries(CONTINUUM_PAIRS_MAP)) {
-    const auId = Number(auIdStr);
-    if (info.isNegative) {
-      const key = `${auId}-${info.pairId}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        // showBlend false for morph-only pairs (no bone to blend with)
-        pairs.push({ negative: auId, positive: info.pairId, showBlend: false });
-      }
-    }
-  }
-  return pairs;
-})();
-
 /** Check if an AU has separate left/right morphs */
-export function hasLeftRightMorphs(auId: number): boolean {
-  const morphs = AU_TO_MORPHS[auId] || [];
-  const hasLeft = morphs.some(k => /_L$|Left$/.test(k));
-  const hasRight = morphs.some(k => /_R$|Right$/.test(k));
-  return hasLeft && hasRight;
-}
+export const hasLeftRightMorphs = (auId: number): boolean => {
+  const keys = AU_TO_MORPHS[auId] || [];
+  return keys.some(k => /_L$|_R$|Left$|Right$/.test(k));
+};
 
 const X_AXIS = new THREE.Vector3(1,0,0);
 const Y_AXIS = new THREE.Vector3(0,1,0);
@@ -193,32 +128,7 @@ export type TransitionHandle = {
   cancel: () => void;
 };
 
-// Optimized transition types - pre-resolved targets for direct access
-type MorphTarget = {
-  mesh: THREE.Mesh;
-  index: number;
-  key: string;
-};
 
-type BoneTarget = {
-  bone: NodeBase;
-  node: string;
-  channel: 'rx' | 'ry' | 'rz' | 'tx' | 'ty' | 'tz';
-  scale: number;
-  maxDegrees?: number;
-  maxUnits?: number;
-};
-
-type ResolvedAUTargets = {
-  auId: number;
-  morphTargets: MorphTarget[];
-  boneTargets: BoneTarget[];
-  mixWeight: number;
-  compositeInfo: {
-    nodes: CompositeRotation['node'][];
-    axis: 'pitch' | 'yaw' | 'roll';
-  } | null;
-};
 
 
 export class EngineThree {
@@ -243,15 +153,13 @@ export class EngineThree {
   private effectParams: EffectParams = { ...DEFAULT_EFFECT_PARAMS };
 
   // Unified rotation state tracking for bones
-  // Each bone maintains its complete 3D rotation (pitch/yaw/roll) to prevent overwriting
-  // TODO: Eventually build this dynamically from shapeDict data and include ALL bones,
-  // not just face/head bones. For now, hardcoded to the 5 composite face bones.
-  private rotations: Record<string, { pitch: number; yaw: number; roll: number }> = {
-    JAW: { pitch: 0, yaw: 0, roll: 0 },
-    HEAD: { pitch: 0, yaw: 0, roll: 0 },
-    EYE_L: { pitch: 0, yaw: 0, roll: 0 },
-    EYE_R: { pitch: 0, yaw: 0, roll: 0 },
-    TONGUE: { pitch: 0, yaw: 0, roll: 0 }
+  // Each axis stores value (signed, with scale applied) and maxDegrees for rendering
+  private rotations: Record<string, Record<'pitch' | 'yaw' | 'roll', { value: number; maxDegrees: number }>> = {
+    JAW: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
+    HEAD: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
+    EYE_L: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
+    EYE_R: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
+    TONGUE: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } }
   };
 
   // Nodes with pending rotation changes - applied once per frame in update()
@@ -265,49 +173,6 @@ export class EngineThree {
   private clock = new THREE.Clock();
   private rafId: number | null = null;
   private running = false;
-  private frameListeners = new Set<(dt: number) => void>();
-
-  /** Animation service - created lazily when start() is called */
-  private _anim: ReturnType<typeof createAnimationService> | null = null;
-
-  /** Get the animation service (creates it if needed) */
-  get anim(): ReturnType<typeof createAnimationService> {
-    if (!this._anim) {
-      this._anim = this.createAnimService();
-    }
-    return this._anim;
-  }
-
-  /** Create the animation service with this engine as the host */
-  private createAnimService(): ReturnType<typeof createAnimationService> {
-    const host: Engine = {
-      applyAU: (id, v) => this.setAU(id as number, v),
-      setMorph: (key, v) => this.setMorph(key, v),
-      transitionAU: (id, v, dur, balance) => this.transitionAU(id, v, dur, balance),
-      transitionMorph: (key, v, dur) => this.transitionMorph(key, v, dur),
-      transitionContinuum: (negAU, posAU, v, dur) => this.transitionContinuum(negAU, posAU, v, dur),
-      // Viseme methods - separate from AU system with integrated jaw control
-      setViseme: (idx, v, jawScale) => this.setViseme(idx, v, jawScale),
-      transitionViseme: (idx, v, dur, jawScale) => this.transitionViseme(idx, v, dur, jawScale),
-      onSnippetEnd: (name) => {
-        try {
-          window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
-        } catch {}
-        try {
-          (window as any).__lastSnippetEnded = name;
-        } catch {}
-      }
-    };
-    const svc = createAnimationService(host);
-    (window as any).anim = svc; // dev handle
-    return svc;
-  }
-
-  /** Subscribe to frame updates. Returns an unsubscribe function. */
-  addFrameListener(callback: (dt: number) => void): () => void {
-    this.frameListeners.add(callback);
-    return () => this.frameListeners.delete(callback);
-  }
 
   /** Start the internal RAF loop */
   start() {
@@ -315,23 +180,9 @@ export class EngineThree {
     this.running = true;
     this.clock.start();
 
-    // Ensure anim service exists (initializes scheduler and machine)
-    this.anim;
-
     const tick = () => {
       if (!this.running) return;
       const dt = this.clock.getDelta();
-
-      // NOTE: step(dt) polling is DISABLED - promise-based playback runners now handle
-      // keyframe transitions. The runners fire transitions at keyframe boundaries and
-      // await TransitionHandle.promise before scheduling the next keyframe.
-      // The step(dt) method still exists in scheduler for backwards compatibility
-      // (e.g., flushOnce for scrubbing) but is not called from the RAF loop.
-
-      // Notify frame listeners
-      this.frameListeners.forEach((fn) => {
-        try { fn(dt); } catch {}
-      });
 
       // Update transitions, mixers, mouse tracking
       this.update(dt);
@@ -357,13 +208,9 @@ export class EngineThree {
     return this.running;
   }
 
-  /** Dispose the engine and animation service */
+  /** Dispose the engine */
   dispose() {
     this.stop();
-    try {
-      this._anim?.dispose?.();
-    } catch {}
-    this._anim = null;
   }
 
   // ============================================================================
@@ -395,81 +242,6 @@ export class EngineThree {
     // console.log(`[EngineThree] Built morph index cache: ${this.morphIndexCache.size} unique morph keys`);
   }
 
-  /**
-   * Resolve all targets for an AU transition upfront.
-   * Returns morph targets with direct mesh/index access and bone rotation configs.
-   */
-  private resolveAUTargets(auId: number): ResolvedAUTargets | null {
-    const morphKeys = AU_TO_MORPHS[auId] || [];
-    const boneBindings = BONE_AU_TO_BINDINGS[auId] || [];
-    const mixWeight = MIXED_AUS.has(auId) ? this.getAUMixWeight(auId) : 1.0;
-
-    // Resolve morph targets to direct mesh/index references
-    const morphTargets: MorphTarget[] = [];
-    for (const key of morphKeys) {
-      const entries = this.morphIndexCache.get(key);
-      if (entries) {
-        for (const { mesh, index } of entries) {
-          // Skip occlusion and tearline meshes
-          const name = (mesh.name || '').toLowerCase();
-          if (name.includes('occlusion') || name.includes('tearline')) continue;
-          morphTargets.push({ mesh, index, key });
-        }
-      }
-    }
-
-    // Resolve bone targets to direct bone references
-    const boneTargets: BoneTarget[] = [];
-    for (const binding of boneBindings) {
-      const boneEntry = this.bones[binding.node as BoneKeys];
-      if (boneEntry) {
-        boneTargets.push({
-          bone: boneEntry,
-          node: binding.node,
-          channel: binding.channel,
-          scale: binding.scale,
-          maxDegrees: binding.maxDegrees,
-          maxUnits: binding.maxUnits
-        });
-      }
-    }
-
-    // Check if this AU is part of a composite rotation
-    const compositeInfo = AU_TO_COMPOSITE_MAP.get(auId);
-
-    return {
-      auId,
-      morphTargets,
-      boneTargets,
-      mixWeight,
-      compositeInfo: compositeInfo || null
-    };
-  }
-
-  /** Apply a single bone target directly (for non-composite bones) */
-  private applyBoneTargetDirect(target: BoneTarget, value: number) {
-    const { bone, channel, scale, maxDegrees, maxUnits } = target;
-    const { obj, basePos, baseQuat } = bone;
-
-    const clampedVal = Math.min(1, Math.max(-1, value));
-    const radians = maxDegrees ? deg2rad(maxDegrees) * clampedVal * scale : 0;
-    const units = maxUnits ? maxUnits * clampedVal * scale : 0;
-
-    obj.position.copy(basePos);
-
-    if (channel === 'rx' || channel === 'ry' || channel === 'rz') {
-      const axis = channel === 'rx' ? X_AXIS : channel === 'ry' ? Y_AXIS : Z_AXIS;
-      const deltaQ = new THREE.Quaternion().setFromAxisAngle(axis, radians);
-      obj.quaternion.copy(baseQuat).multiply(deltaQ);
-    } else {
-      const dir = channel === 'tx' ? X_AXIS.clone() : channel === 'ty' ? Y_AXIS.clone() : Z_AXIS.clone();
-      dir.applyQuaternion(baseQuat);
-      obj.position.copy(basePos).add(dir.multiplyScalar(units));
-    }
-
-    obj.updateMatrixWorld(false);
-  }
-
   // No constructor needed - all state is initialized inline
 
   private getMorphValue(key: string): number {
@@ -499,131 +271,40 @@ export class EngineThree {
    */
   transitionAU = (id: number | string, to: number, durationMs = 200, balance?: number): TransitionHandle => {
     const numId = typeof id === 'string' ? Number(id.replace(/[^\d]/g, '')) : id;
-    const pairInfo = CONTINUUM_PAIRS_MAP[numId];
+    const target = clamp01(to);
 
-    // For continuum pairs, use the continuum transition system
-    if (pairInfo) {
-      const negAU = pairInfo.isNegative ? numId : pairInfo.pairId;
-      const posAU = pairInfo.isNegative ? pairInfo.pairId : numId;
-      const continuumTarget = pairInfo.isNegative ? -to : to;
-      return this.transitionContinuum(negAU, posAU, continuumTarget, durationMs);
-    }
+    // Get morph keys and bone bindings directly from shape dict
+    const morphKeys = AU_TO_MORPHS[numId] || [];
+    const bindings = BONE_AU_TO_BINDINGS[numId] || [];
 
-    // Store balance if provided
-    if (balance !== undefined) {
-      this.auBalances[numId] = Math.max(-1, Math.min(1, balance));
-    }
-
-    // Get effective balance (from param or stored)
-    const effectiveBalance = balance ?? this.auBalances[numId] ?? 0;
-
-    // Resolve targets upfront for direct application
-    const resolved = this.resolveAUTargets(numId);
-    if (!resolved) {
-      return { promise: Promise.resolve(), pause: () => {}, resume: () => {}, cancel: () => {} };
-    }
-
-    // Separate left and right morphs for balance application
-    const leftMorphs: MorphTarget[] = [];
-    const rightMorphs: MorphTarget[] = [];
-    const neutralMorphs: MorphTarget[] = [];
-
-    for (const mt of resolved.morphTargets) {
-      if (/(_L|Left)$/.test(mt.key)) {
-        leftMorphs.push(mt);
-      } else if (/(_R|Right)$/.test(mt.key)) {
-        rightMorphs.push(mt);
-      } else {
-        neutralMorphs.push(mt);
-      }
-    }
-
-    // Calculate balance scales (computed once, used each tick)
+    // Calculate balance scales
+    const effectiveBalance = balance ?? 0;
     const leftScale = effectiveBalance >= 0 ? 1 - effectiveBalance : 1;
     const rightScale = effectiveBalance <= 0 ? 1 + effectiveBalance : 1;
 
-    const transitionKey = `au_${numId}`;
-    const from = this.auValues[numId] ?? 0;
-    const target = clamp01(to);
+    this.auValues[numId] = target;
 
-    // Optimized apply function with balance
-    const applyWithBalance = (value: number) => {
-      this.auValues[numId] = value;
-      const morphValue = value * resolved.mixWeight;
+    const handles: TransitionHandle[] = [];
 
-      // Apply morphs with balance scaling
-      for (const { mesh, index } of leftMorphs) {
-        if (mesh.morphTargetInfluences) {
-          mesh.morphTargetInfluences[index] = morphValue * leftScale;
-        }
-      }
-      for (const { mesh, index } of rightMorphs) {
-        if (mesh.morphTargetInfluences) {
-          mesh.morphTargetInfluences[index] = morphValue * rightScale;
-        }
-      }
-      for (const { mesh, index } of neutralMorphs) {
-        if (mesh.morphTargetInfluences) {
-          mesh.morphTargetInfluences[index] = morphValue;
-        }
-      }
+    // Transition morphs - L/R pairs get balance scaling, others get full target
+    const [leftMorph, rightMorph, ...rest] = morphKeys;
+    if (leftMorph) handles.push(this.transitionMorph(leftMorph, target * leftScale, durationMs));
+    if (rightMorph) handles.push(this.transitionMorph(rightMorph, target * rightScale, durationMs));
+    for (const morph of rest) handles.push(this.transitionMorph(morph, target, durationMs));
 
-      // Handle bone rotations (same as transitionAUOptimized)
-      if (resolved.compositeInfo) {
-        for (const nodeKey of resolved.compositeInfo.nodes) {
-          const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
-          if (!config) continue;
-          const axisConfig = config[resolved.compositeInfo.axis];
-          if (!axisConfig) continue;
+    // Transition bones - eyes have 2 bindings (EYE_L, EYE_R), others have 1
+    for (const binding of bindings) {
+      const axis = binding.channel === 'rx' ? 'pitch' : binding.channel === 'ry' ? 'yaw' : 'roll';
+      handles.push(this.transitionBoneRotation(
+        binding.node,
+        axis,
+        target * binding.scale,
+        binding.maxDegrees ?? 0,
+        durationMs
+      ));
+    }
 
-          let axisValue = 0;
-          if (axisConfig.negative !== undefined && axisConfig.positive !== undefined) {
-            const negValue = this.auValues[axisConfig.negative] ?? 0;
-            const posValue = this.auValues[axisConfig.positive] ?? 0;
-            axisValue = posValue - negValue;
-          } else if (axisConfig.aus.length > 1) {
-            axisValue = Math.max(...axisConfig.aus.map(auId => this.auValues[auId] ?? 0));
-          } else {
-            axisValue = value;
-          }
-
-          this.rotations[nodeKey][resolved.compositeInfo.axis] = Math.max(-1, Math.min(1, axisValue));
-          this.pendingCompositeNodes.add(nodeKey);
-        }
-      } else {
-        for (const boneTarget of resolved.boneTargets) {
-          this.applyBoneTargetDirect(boneTarget, value);
-        }
-      }
-    };
-
-    return this.addTransition(
-      transitionKey,
-      from,
-      target,
-      durationMs / 1000,
-      applyWithBalance
-    );
-  };
-
-  /**
-   * Smoothly transition the left/right balance for a bilateral AU.
-   *
-   * @param id - AU ID
-   * @param toBalance - Target balance: -1 = left only, 0 = both equally, +1 = right only
-   * @param durationMs - Transition duration in milliseconds
-   */
-  transitionAUBalance = (id: number, toBalance: number, durationMs = 200): TransitionHandle => {
-    const transitionKey = `au_balance_${id}`;
-    const from = this.auBalances[id] ?? 0;
-    const target = Math.max(-1, Math.min(1, toBalance));
-    return this.addTransition(
-      transitionKey,
-      from,
-      target,
-      durationMs / 1000,
-      (value) => this.setAUBalance(id, value)
-    );
+    return this.combineHandles(handles);
   };
 
   /** Smoothly tween a morph to a target value */
@@ -635,192 +316,138 @@ export class EngineThree {
       transitionKey,
       from,
       target,
-      durationMs / 1000,
+      durationMs,
       (value) => this.setMorph(key, value)
     );
   };
 
+  /**
+   * Smoothly transition a composite bone rotation axis.
+   * Value should already have scale applied. maxDegrees from binding.
+   */
+  private transitionBoneRotation = (
+    nodeKey: string,
+    axis: 'pitch' | 'yaw' | 'roll',
+    to: number,
+    maxDegrees: number,
+    durationMs = 200
+  ): TransitionHandle => {
+    const transitionKey = `bone_${nodeKey}_${axis}`;
+    const from = this.rotations[nodeKey]?.[axis]?.value ?? 0;
+    const target = Math.max(-1, Math.min(1, to));
+    return this.addTransition(
+      transitionKey,
+      from,
+      target,
+      durationMs,
+      (value) => this.updateBoneRotation(nodeKey, axis, value, maxDegrees)
+    );
+  };
+
+  /**
+   * Combine multiple TransitionHandles into one.
+   * The combined promise resolves when ALL transitions complete.
+   */
+  private combineHandles(handles: TransitionHandle[]): TransitionHandle {
+    if (handles.length === 0) {
+      return { promise: Promise.resolve(), pause: () => {}, resume: () => {}, cancel: () => {} };
+    }
+    if (handles.length === 1) {
+      return handles[0];
+    }
+    return {
+      promise: Promise.all(handles.map(h => h.promise)).then(() => {}),
+      pause: () => handles.forEach(h => h.pause()),
+      resume: () => handles.forEach(h => h.resume()),
+      cancel: () => handles.forEach(h => h.cancel()),
+    };
+  }
+
   // ============================================================================
   // VISEME SYSTEM - Separate from AU System
   //
-  // Visemes apply BOTH morph targets AND jaw bone rotation in a coordinated way.
-  // This is intentionally separate from the AU system to avoid conflicts:
-  // - setViseme() / transitionViseme() handle jaw internally via applyJawBoneRotation()
-  // - Do NOT use setAU(26) alongside visemes - that causes double jaw movement
+  // Visemes apply morph targets ONLY (no jaw bone rotation).
+  // Jaw movement should be controlled separately via AU 26 if needed.
+  // - setViseme() / transitionViseme() apply morph targets only
   // - The AnimationScheduler routes viseme curve IDs (0-14) to transitionViseme()
   // ============================================================================
-
-  /**
-   * Jaw opening amounts for each viseme index (0-14)
-   * Based on phonetic properties - how much the jaw opens for each mouth shape
-   */
-  private visemeJawAmounts: number[] = [
-    0.2,  // 0: EE - minimal jaw, high front vowel
-    0.4,  // 1: Er - medium, r-colored
-    0.3,  // 2: IH - slight, high front
-    0.8,  // 3: Ah - wide open
-    0.7,  // 4: Oh - rounded, medium-wide
-    0.4,  // 5: W_OO - rounded, moderate
-    0.1,  // 6: S_Z - nearly closed, sibilants
-    0.2,  // 7: Ch_J - slight, postalveolar
-    0.15, // 8: F_V - nearly closed, labiodental
-    0.2,  // 9: TH - slight, dental
-    0.15, // 10: T_L_D_N - slight, alveolar
-    0.0,  // 11: B_M_P - fully closed, bilabial
-    0.3,  // 12: K_G_H_NG - medium, velar
-    0.6,  // 13: AE - medium open, neutral vowel
-    0.3,  // 14: R - retroflex, small
-  ];
 
   /** Track current viseme values for transitions */
   private visemeValues: number[] = new Array(15).fill(0);
 
   /**
    * Set viseme value immediately (no transition)
-   * Applies both viseme morph target AND jaw bone rotation
+   * Applies viseme morph target only (no jaw bone rotation)
    *
    * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
    * @param value - Target value in [0, 1]
-   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   * @param _jawScale - Unused, kept for API compatibility
    */
-  setViseme = (visemeIndex: number, value: number, jawScale: number = 1.0) => {
+  setViseme = (visemeIndex: number, value: number, _jawScale: number = 1.0) => {
     if (visemeIndex < 0 || visemeIndex >= VISEME_KEYS.length) return;
 
     const val = clamp01(value);
     this.visemeValues[visemeIndex] = val;
 
-    // Apply viseme morph
+    // Apply viseme morph only (no jaw bone rotation)
     const morphKey = VISEME_KEYS[visemeIndex];
     this.setMorph(morphKey, val);
-
-    // Apply jaw bone rotation based on viseme type
-    const jawAmount = this.visemeJawAmounts[visemeIndex] * val * jawScale;
-    this.applyJawBoneRotation(jawAmount);
-  };
-
-  /**
-   * Apply jaw bone rotation directly (separate from AU system)
-   * Used by viseme system for phonetic jaw movement
-   */
-  private applyJawBoneRotation = (jawAmount: number) => {
-    const jawBone = this.bones.JAW;
-    if (!jawBone) return;
-
-    const clampedVal = clamp01(jawAmount);
-    // JAW bone rotates on rz axis - increased to 25 degrees for more expressive speech
-    // (was 14.6, AU 27 Mouth Stretch uses 18.25, allowing more range for visemes)
-    const maxDegrees = 25;
-    const radians = deg2rad(maxDegrees) * clampedVal;
-
-    // Apply rotation relative to base pose
-    const deltaQ = new THREE.Quaternion().setFromAxisAngle(Z_AXIS, radians);
-    jawBone.obj.quaternion.copy(jawBone.baseQuat).multiply(deltaQ);
-    jawBone.obj.updateMatrixWorld(false);
-  };
-
-  /**
-   * Get current combined jaw amount from all active visemes
-   * Sums weighted jaw contributions from each viseme
-   */
-  private getVisemeJawAmount = (jawScale: number): number => {
-    let totalJaw = 0;
-    for (let i = 0; i < this.visemeValues.length; i++) {
-      totalJaw += this.visemeValues[i] * this.visemeJawAmounts[i];
-    }
-    return Math.min(1, totalJaw * jawScale);
   };
 
   /**
    * Smoothly transition a viseme value
-   * Applies both viseme morph target AND jaw bone rotation
+   * Applies viseme morph target only (no jaw bone rotation)
    *
    * @param visemeIndex - Viseme index (0-14) corresponding to VISEME_KEYS
    * @param to - Target value in [0, 1]
    * @param durationMs - Transition duration in milliseconds (default: 80ms)
-   * @param jawScale - Optional jaw activation multiplier (default: 1.0)
+   * @param _jawScale - Unused, kept for API compatibility
    */
-  transitionViseme = (visemeIndex: number, to: number, durationMs = 80, jawScale: number = 1.0): TransitionHandle => {
+  transitionViseme = (visemeIndex: number, to: number, durationMs = 80, _jawScale: number = 1.0): TransitionHandle => {
     if (visemeIndex < 0 || visemeIndex >= VISEME_KEYS.length) {
       return { promise: Promise.resolve(), pause: () => {}, resume: () => {}, cancel: () => {} };
     }
 
-    const transitionKey = `viseme_${visemeIndex}`;
-    const from = this.visemeValues[visemeIndex] ?? 0;
-    const target = clamp01(to);
+    const morphKey = VISEME_KEYS[visemeIndex];
+    this.visemeValues[visemeIndex] = clamp01(to);
 
-    return this.addTransition(
-      transitionKey,
-      from,
-      target,
-      durationMs / 1000,
-      (value) => {
-        this.visemeValues[visemeIndex] = value;
-
-        // Apply viseme morph
-        const morphKey = VISEME_KEYS[visemeIndex];
-        this.setMorph(morphKey, value);
-
-        // Apply combined jaw from all active visemes
-        const combinedJaw = this.getVisemeJawAmount(jawScale);
-        this.applyJawBoneRotation(combinedJaw);
-      }
-    );
+    // Just call transitionMorph - it handles the transition
+    return this.transitionMorph(morphKey, to, durationMs);
   };
 
   /**
    * Set a continuum AU pair immediately (no animation).
-   *
-   * Sign convention:
-   * - Negative value (-1 to 0): activates negAU (e.g., head left, eyes left)
-   * - Positive value (0 to +1): activates posAU (e.g., head right, eyes right)
-   *
-   * Internally calls setAU() which handles:
-   * - Morph application (scaled by mixWeight)
-   * - Bone rotation (always at full strength based on value)
-   *
-   * @param negAU - AU ID for negative direction (e.g., 31 for head left, 61 for eyes left)
-   * @param posAU - AU ID for positive direction (e.g., 32 for head right, 62 for eyes right)
-   * @param continuumValue - Value from -1 (full negative) to +1 (full positive)
+   * Only calls setAU for ONE AU based on sign to avoid bone overwrite.
    */
   setContinuum = (negAU: number, posAU: number, continuumValue: number) => {
     const value = Math.max(-1, Math.min(1, continuumValue));
 
-    // Negative value = activate negAU, zero posAU
-    // Positive value = activate posAU, zero negAU
-    const negVal = value < 0 ? Math.abs(value) : 0;
-    const posVal = value > 0 ? value : 0;
-
-    this.setAU(negAU, negVal);
-    this.setAU(posAU, posVal);
+    if (value < 0) {
+      this.setAU(negAU, Math.abs(value));
+    } else if (value > 0) {
+      this.setAU(posAU, value);
+    } else {
+      this.setAU(posAU, 0);
+    }
   };
 
   /**
-   * Smoothly transition a continuum AU pair (e.g., eyes left/right, head up/down).
-   * Takes a continuum value from -1 to +1 and internally manages both AU values.
-   *
-   * Sign convention:
-   * - Negative value (-1 to 0): activates negAU (e.g., head left, eyes left)
-   * - Positive value (0 to +1): activates posAU (e.g., head right, eyes right)
-   *
-   * @param negAU - AU ID for negative direction (e.g., 31 for head left, 61 for eyes left)
-   * @param posAU - AU ID for positive direction (e.g., 32 for head right, 62 for eyes right)
-   * @param continuumValue - Target value from -1 (full negative) to +1 (full positive)
-   * @param durationMs - Transition duration in milliseconds
+   * Smoothly transition a continuum AU pair.
+   * Only calls setAU for ONE AU based on sign to avoid bone overwrite.
    */
   transitionContinuum = (negAU: number, posAU: number, continuumValue: number, durationMs = 200): TransitionHandle => {
     const target = Math.max(-1, Math.min(1, continuumValue));
     const driverKey = `continuum_${negAU}_${posAU}`;
 
-    // Get current continuum value: negative if negAU active, positive if posAU active
     const currentNeg = this.auValues[negAU] ?? 0;
     const currentPos = this.auValues[posAU] ?? 0;
-    const currentContinuum = currentPos - currentNeg;  // pos - neg so positive = right
+    const currentContinuum = currentPos - currentNeg;
 
     return this.addTransition(
       driverKey,
       currentContinuum,
       target,
-      durationMs / 1000,
+      durationMs,
       (value) => this.setContinuum(negAU, posAU, value)
     );
   };
@@ -899,10 +526,13 @@ export class EngineThree {
     key: string,
     from: number,
     to: number,
-    durationSec: number,
+    durationMs: number,
     apply: (value: number) => void,
     easing: (t: number) => number = this.easeInOutQuad
   ): TransitionHandle {
+    // Convert to seconds once here - all callers pass milliseconds
+    const durationSec = durationMs / 1000;
+
     // Cancel existing transition for this key
     const existing = this.transitions.get(key);
     if (existing?.resolve) {
@@ -1074,11 +704,11 @@ export class EngineThree {
     const v = this.auValues[id] ?? 0;
     if (v > 0) this.applyBothSides(id, v);
 
-    // Mark affected bone as pending (bones don't change, but ensures consistency)
-    const compositeInfo = AU_TO_COMPOSITE_MAP.get(id);
-    if (compositeInfo) {
-      for (const nodeKey of compositeInfo.nodes) {
-        this.pendingCompositeNodes.add(nodeKey);
+    // Mark affected bones as pending
+    const boneBindings = BONE_AU_TO_BINDINGS[id];
+    if (boneBindings) {
+      for (const binding of boneBindings) {
+        this.pendingCompositeNodes.add(binding.node);
       }
     }
   };
@@ -1120,12 +750,13 @@ export class EngineThree {
     this.auValues = {};
 
     // 2. Reset all composite bone rotation state
+    const zero = { value: 0, maxDegrees: 0 };
     this.rotations = {
-      JAW: { pitch: 0, yaw: 0, roll: 0 },
-      HEAD: { pitch: 0, yaw: 0, roll: 0 },
-      EYE_L: { pitch: 0, yaw: 0, roll: 0 },
-      EYE_R: { pitch: 0, yaw: 0, roll: 0 },
-      TONGUE: { pitch: 0, yaw: 0, roll: 0 }
+      JAW: { pitch: { ...zero }, yaw: { ...zero }, roll: { ...zero } },
+      HEAD: { pitch: { ...zero }, yaw: { ...zero }, roll: { ...zero } },
+      EYE_L: { pitch: { ...zero }, yaw: { ...zero }, roll: { ...zero } },
+      EYE_R: { pitch: { ...zero }, yaw: { ...zero }, roll: { ...zero } },
+      TONGUE: { pitch: { ...zero }, yaw: { ...zero }, roll: { ...zero } }
     };
 
     // 3. Clear all active transitions
@@ -1198,9 +829,13 @@ export class EngineThree {
   /** Morphs **/
   setMorph = (key: string, v: number) => {
     const val = clamp01(v);
+    const isEyeOcclusionMorph = key.startsWith('EO ');
     for (const m of this.meshes) {
       const name = (m.name || '').toLowerCase();
-      if (name.includes('occlusion') || name.includes('tearline')) continue;
+      // Skip occlusion/tearline meshes UNLESS this is an eye occlusion morph
+      if (!isEyeOcclusionMorph && (name.includes('occlusion') || name.includes('tearline'))) continue;
+      // For eye occlusion morphs, only include occlusion meshes
+      if (isEyeOcclusionMorph && !name.includes('occlusion')) continue;
       const dict: any = (m as any).morphTargetDictionary;
       const infl: any = (m as any).morphTargetInfluences;
       if (!dict || !infl) continue;
@@ -1238,13 +873,17 @@ export class EngineThree {
     const foundMorphs: string[] = [];
     const notFoundMorphs: string[] = [];
 
-    for (const m of this.meshes) {
-      const name = (m.name || '').toLowerCase();
-      if (name.includes('occlusion') || name.includes('tearline')) continue;
-      const dict: any = (m as any).morphTargetDictionary;
-      const infl: any = (m as any).morphTargetInfluences;
-      if (!dict || !infl) continue;
-      for (const k of keys) {
+    for (const k of keys) {
+      const isEyeOcclusionMorph = k.startsWith('EO ');
+      for (const m of this.meshes) {
+        const name = (m.name || '').toLowerCase();
+        // Skip occlusion/tearline meshes UNLESS this is an eye occlusion morph
+        if (!isEyeOcclusionMorph && (name.includes('occlusion') || name.includes('tearline'))) continue;
+        // For eye occlusion morphs, only include occlusion meshes
+        if (isEyeOcclusionMorph && !name.includes('occlusion')) continue;
+        const dict: any = (m as any).morphTargetDictionary;
+        const infl: any = (m as any).morphTargetInfluences;
+        if (!dict || !infl) continue;
         const idx = dict[k];
         if (idx !== undefined) {
           infl[idx] = val;
@@ -1258,17 +897,11 @@ export class EngineThree {
   };
 
   /**
-   * Set an AU value. Supports multiple formats:
-   * - Numeric ID with 0-1 value: setAU(12, 0.5) - standard activation
-   * - Numeric ID with -1 to +1 value: setAU(41, -0.5) - for continuum pairs, negative activates the pair
-   * - String with side: setAU('12L', 0.5) - left side only (legacy, converts to balance=-1)
+   * Set an AU value immediately (no transition).
    *
    * @param id - AU ID (number) or string with side suffix ('12L', '12R')
-   * @param v - Intensity value (0-1 for standard AUs, -1 to +1 for continuum pairs)
+   * @param v - Intensity value (0-1)
    * @param balance - Optional left/right balance: -1 = left only, 0 = both equally, +1 = right only
-   *
-   * For continuum pairs (e.g., AU 41/42 tongue tilt), passing a negative value to either AU
-   * will automatically activate the paired AU instead.
    */
   setAU = (id: number | string, v: number, balance?: number) => {
     if (typeof id === 'string') {
@@ -1296,83 +929,17 @@ export class EngineThree {
       this.auBalances[id] = Math.max(-1, Math.min(1, balance));
     }
 
-    // Check if this AU is part of a continuum pair and handle negative values
-    const pairInfo = CONTINUUM_PAIRS_MAP[id];
-    if (pairInfo && v < 0) {
-      // Negative value on a continuum AU - activate the paired AU instead
-      const absVal = Math.abs(v);
-      this.auValues[id] = 0;
-      this.auValues[pairInfo.pairId] = absVal;
-      // Continue with the paired AU's composite rotation logic
-      this.applyBothSides(pairInfo.pairId, absVal, effectiveBalance);
-      const compositeInfo = AU_TO_COMPOSITE_MAP.get(pairInfo.pairId);
-      if (compositeInfo) {
-        for (const nodeKey of compositeInfo.nodes) {
-          const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
-          if (!config) continue;
-          const axisConfig = config[compositeInfo.axis];
-          if (!axisConfig) continue;
-          let axisValue = 0;
-          if (axisConfig.negative !== undefined && axisConfig.positive !== undefined) {
-            const negValue = this.auValues[axisConfig.negative] ?? 0;
-            const posValue = this.auValues[axisConfig.positive] ?? 0;
-            axisValue = posValue - negValue;
-          } else {
-            axisValue = absVal;
-          }
-          this.updateBoneRotation(nodeKey, compositeInfo.axis, axisValue);
-          this.pendingCompositeNodes.add(nodeKey);
-        }
-      }
-      return;
-    }
-
     this.auValues[id] = v;
 
-    // Check if this AU is part of a composite rotation system
-    const compositeInfo = AU_TO_COMPOSITE_MAP.get(id);
+    // Apply morphs (with balance for bilateral morphs)
+    this.applyBothSides(id, v, effectiveBalance);
 
-    if (compositeInfo) {
-      // This AU affects composite bone rotations (jaw, head, eyes)
-      // Always apply morphs first (with balance for bilateral morphs)
-      this.applyBothSides(id, v, effectiveBalance);
-
-      // Update rotation state for each affected node
-      for (const nodeKey of compositeInfo.nodes) {
-        // Determine the value for this axis based on the continuum
-        const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
-        if (!config) continue;
-
-        const axisConfig = config[compositeInfo.axis];
-        if (!axisConfig) continue;
-
-        // Calculate axis value based on whether it's a continuum or multi-AU axis
-        let axisValue = 0;
-        if (axisConfig.negative !== undefined && axisConfig.positive !== undefined) {
-          // Continuum: calculate difference between positive and negative AUs
-          const negValue = this.auValues[axisConfig.negative] ?? 0;
-          const posValue = this.auValues[axisConfig.positive] ?? 0;
-          axisValue = posValue - negValue;
-        } else if (axisConfig.aus.length > 1) {
-          // Multiple AUs affect same axis (e.g., jaw drop has AU 25, 26, 27)
-          // Use the maximum value among all AUs for this axis
-          axisValue = Math.max(...axisConfig.aus.map(auId => this.auValues[auId] ?? 0));
-        } else {
-          // Single AU controls this axis
-          axisValue = v;
-        }
-
-        // Update the rotation state for this axis
-        this.updateBoneRotation(nodeKey, compositeInfo.axis, axisValue);
-
-        // Mark node as pending - will be applied in update()
-        this.pendingCompositeNodes.add(nodeKey);
-      }
-    } else {
-      // Non-composite AU: apply directly to both morphs and bones (with balance)
-      this.applyBothSides(id, v, effectiveBalance);
-      if (this.hasBoneBinding(id)) {
-        this.applyBones(id, v);
+    // Apply bones - channel tells us axis, scale gives direction
+    const bindings = BONE_AU_TO_BINDINGS[id];
+    if (bindings) {
+      for (const binding of bindings) {
+        const axis = binding.channel === 'rx' ? 'pitch' : binding.channel === 'ry' ? 'yaw' : 'roll';
+        this.updateBoneRotation(binding.node, axis, v * binding.scale, binding.maxDegrees ?? 0);
       }
     }
   };
@@ -1439,26 +1006,32 @@ export class EngineThree {
 
   /**
    * Update rotation state for a specific axis of a composite bone.
-   * This allows independent control of pitch/yaw/roll without overwriting.
+   * Value should already have scale applied (signed direction).
+   * maxDegrees is stored for use in applyCompositeRotation.
    */
   private updateBoneRotation(
-    nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE',
+    nodeKey: string,
     axis: 'pitch' | 'yaw' | 'roll',
-    value: number
+    value: number,
+    maxDegrees: number
   ) {
-    this.rotations[nodeKey][axis] = Math.max(-1, Math.min(1, value));
+    if (!this.rotations[nodeKey]) return; // Skip unknown bones
+    this.rotations[nodeKey][axis] = {
+      value: Math.max(-1, Math.min(1, value)),
+      maxDegrees
+    };
+    this.pendingCompositeNodes.add(nodeKey);
   }
 
   /**
    * Apply the complete composite rotation for a bone.
    * Combines pitch/yaw/roll from rotation state into a single quaternion.
+   * All values and maxDegrees are already stored in rotations state.
    */
   private applyCompositeRotation(nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE') {
-    const bones = this.bones;
-    const entry = bones[nodeKey];
+    const entry = this.bones[nodeKey];
     if (!entry || !this.model) {
       if (!entry && this.rigReady && !this.missingBoneWarnings.has(nodeKey)) {
-        // console.warn(`[EngineThree] applyCompositeRotation: No bone entry for ${nodeKey}`);
         this.missingBoneWarnings.add(nodeKey);
       }
       return;
@@ -1467,80 +1040,29 @@ export class EngineThree {
     const { obj, basePos, baseQuat } = entry;
     const rotState = this.rotations[nodeKey];
 
-    // Find the composite rotation config for this node
-    const config = COMPOSITE_ROTATIONS.find(c => c.node === nodeKey);
-    if (!config) return;
-
-    // Helper to get binding from the correct AU for an axis based on direction
-    const getBindingForAxis = (
-      axisConfig: typeof config.pitch | typeof config.yaw | typeof config.roll,
-      direction: number
-    ) => {
-      if (!axisConfig) return null;
-
-      // For continuum pairs, select the AU based on direction
-      // negative direction → use negative AU's binding
-      // positive direction → use positive AU's binding
-      if (axisConfig.negative !== undefined && axisConfig.positive !== undefined) {
-        const auId = direction < 0 ? axisConfig.negative : axisConfig.positive;
-        return BONE_AU_TO_BINDINGS[auId]?.[0];
-      }
-
-      // If multiple AUs (non-continuum), find which one is active (has highest value)
-      if (axisConfig.aus.length > 1) {
-        let maxAU = axisConfig.aus[0];
-        let maxValue = this.auValues[maxAU] ?? 0;
-        for (const auId of axisConfig.aus) {
-          const val = this.auValues[auId] ?? 0;
-          if (val > maxValue) {
-            maxValue = val;
-            maxAU = auId;
-          }
-        }
-        return BONE_AU_TO_BINDINGS[maxAU]?.[0];
-      }
-
-      // Single AU - use first AU
-      return BONE_AU_TO_BINDINGS[axisConfig.aus[0]]?.[0];
-    };
-
     // Build composite quaternion from individual axes
+    // pitch=rx, yaw=ry, roll=rz
     const compositeQ = new THREE.Quaternion().copy(baseQuat);
 
-    // Helper to get axis from config
-    const getAxis = (axisName: 'rx' | 'ry' | 'rz') =>
-      axisName === 'rx' ? X_AXIS : axisName === 'ry' ? Y_AXIS : Z_AXIS;
-
-    // Apply rotations in order: yaw, pitch, roll
-    // Use the channel from the binding (BONE_AU_TO_BINDINGS) as the source of truth for axis
-    if (config.yaw && rotState.yaw !== 0) {
-      const binding = getBindingForAxis(config.yaw, rotState.yaw);
-      if (binding?.maxDegrees && binding.channel) {
-        const radians = deg2rad(binding.maxDegrees) * Math.abs(rotState.yaw) * binding.scale;
-        const axis = getAxis(binding.channel as 'rx' | 'ry' | 'rz');
-        const deltaQ = new THREE.Quaternion().setFromAxisAngle(axis, radians);
-        compositeQ.multiply(deltaQ);
-      }
+    // Apply yaw (ry = Y_AXIS)
+    if (rotState.yaw.value !== 0 && rotState.yaw.maxDegrees > 0) {
+      const radians = deg2rad(rotState.yaw.maxDegrees) * rotState.yaw.value;
+      const deltaQ = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, radians);
+      compositeQ.multiply(deltaQ);
     }
 
-    if (config.pitch && rotState.pitch !== 0) {
-      const binding = getBindingForAxis(config.pitch, rotState.pitch);
-      if (binding?.maxDegrees && binding.channel) {
-        const radians = deg2rad(binding.maxDegrees) * Math.abs(rotState.pitch) * binding.scale;
-        const axis = getAxis(binding.channel as 'rx' | 'ry' | 'rz');
-        const deltaQ = new THREE.Quaternion().setFromAxisAngle(axis, radians);
-        compositeQ.multiply(deltaQ);
-      }
+    // Apply pitch (rx = X_AXIS)
+    if (rotState.pitch.value !== 0 && rotState.pitch.maxDegrees > 0) {
+      const radians = deg2rad(rotState.pitch.maxDegrees) * rotState.pitch.value;
+      const deltaQ = new THREE.Quaternion().setFromAxisAngle(X_AXIS, radians);
+      compositeQ.multiply(deltaQ);
     }
 
-    if (config.roll && rotState.roll !== 0) {
-      const binding = getBindingForAxis(config.roll, rotState.roll);
-      if (binding?.maxDegrees && binding.channel) {
-        const radians = deg2rad(binding.maxDegrees) * Math.abs(rotState.roll) * binding.scale;
-        const axis = getAxis(binding.channel as 'rx' | 'ry' | 'rz');
-        const deltaQ = new THREE.Quaternion().setFromAxisAngle(axis, radians);
-        compositeQ.multiply(deltaQ);
-      }
+    // Apply roll (rz = Z_AXIS)
+    if (rotState.roll.value !== 0 && rotState.roll.maxDegrees > 0) {
+      const radians = deg2rad(rotState.roll.maxDegrees) * rotState.roll.value;
+      const deltaQ = new THREE.Quaternion().setFromAxisAngle(Z_AXIS, radians);
+      compositeQ.multiply(deltaQ);
     }
 
     // Apply composite rotation
@@ -1548,78 +1070,6 @@ export class EngineThree {
     obj.quaternion.copy(compositeQ);
     obj.updateMatrixWorld(false);
     this.model.updateMatrixWorld(true);
-    // console.log(`  → Applied composite rotation to ${nodeKey} bone`);
-  }
-
-  private applyBones = (id: number, v: number) => {
-    const bindings = BONE_AU_TO_BINDINGS[id];
-    if (!bindings || !bindings.length || !this.model) return;
-    const bones = this.bones;
-
-    // Clamp to normalized range (-1 to +1) to preserve natural limits
-    const val = Math.min(1, Math.max(-1, v));
-
-    for (const b of bindings) {
-      const entry = bones[b.node as BoneKeys];
-      if (!entry) continue;
-
-      // Eye axis override for CC rigs
-      let binding = { ...b };
-      if (id >= 61 && id <= 62) {
-        binding = { ...binding, channel: EYE_AXIS.yaw };
-      } else if (id >= 63 && id <= 64) {
-        binding = { ...binding, channel: EYE_AXIS.pitch };
-      }
-
-      // Use absolute magnitude (0–1) with signed rotation respecting maxDegrees
-      const absVal = Math.abs(val);
-      const signedScale = Math.sign(val) || 1;
-      const radians = b.maxDegrees ? deg2rad(b.maxDegrees) * absVal * b.scale * signedScale : 0;
-      const units = b.maxUnits ? b.maxUnits * absVal * b.scale * signedScale : 0;
-
-      // Apply the binding
-      this.applySingleBinding(entry, { ...binding, maxDegrees: b.maxDegrees, maxUnits: b.maxUnits, scale: b.scale }, val);
-    }
-
-    this.model.updateMatrixWorld(true);
-  };
-
-  private applySingleBinding(
-    entry: NodeBase,
-    b: { channel: string; maxDegrees?: number; maxUnits?: number; scale: number; node?: string },
-    val: number
-  ) {
-    const { obj, basePos, baseQuat } = entry;
-
-    // Clamp input to natural range [-1, 1]
-    const clampedVal = Math.min(1, Math.max(-1, val));
-
-    // Calculate radians/units respecting maxDegrees and scale
-    const radians = b.maxDegrees ? deg2rad(b.maxDegrees) * clampedVal * b.scale : 0;
-    const units = b.maxUnits ? b.maxUnits * clampedVal * b.scale : 0;
-
-    // Maintain base position (no drift)
-    obj.position.copy(basePos);
-
-    // Apply combined axis rotation while preserving boundaries
-    if (b.channel === 'rx' || b.channel === 'ry' || b.channel === 'rz') {
-      const deltaQ = new THREE.Quaternion();
-      const axis = b.channel === 'rx' ? X_AXIS : b.channel === 'ry' ? Y_AXIS : Z_AXIS;
-
-      // Compute new rotation relative to baseQuat (no accumulation here; callers should compose before calling)
-      deltaQ.setFromAxisAngle(axis, radians);
-      obj.quaternion.copy(baseQuat).multiply(deltaQ);
-    } else {
-      const dir =
-        b.channel === 'tx' ? X_AXIS.clone() :
-        b.channel === 'ty' ? Y_AXIS.clone() : Z_AXIS.clone();
-      dir.applyQuaternion(baseQuat);
-      const offset = dir.multiplyScalar(units);
-      obj.position.copy(basePos).add(offset);
-    }
-
-    // Update only this node’s matrix without resetting others
-    obj.updateMatrixWorld(false);
   }
 
   /** Resolve CC4 bones using explicit node names (no heuristics). */
@@ -2001,8 +1451,8 @@ export class EngineThree {
     if (this.registeredHairObjects.size === 0) return;
 
     const cfg = this.hairPhysicsConfig;
-    const headYaw = this.rotations.HEAD?.yaw ?? 0;
-    const headPitch = this.rotations.HEAD?.pitch ?? 0;
+    const headYaw = this.rotations.HEAD?.yaw?.value ?? 0;
+    const headPitch = this.rotations.HEAD?.pitch?.value ?? 0;
 
     // Calculate hair offset based on head position
     // Hair swings opposite to head rotation (inertia effect)
@@ -2042,7 +1492,7 @@ export class EngineThree {
       transitionKey,
       from,
       to,
-      durationMs / 1000,
+      durationMs,
       (value) => this.setMorphOnMeshes(hairMeshNames, morphKey, value)
     );
   }
@@ -2087,9 +1537,9 @@ export class EngineThree {
    */
   getHeadRotation(): { yaw: number; pitch: number; roll: number } {
     return {
-      yaw: this.rotations.HEAD?.yaw ?? 0,
-      pitch: this.rotations.HEAD?.pitch ?? 0,
-      roll: this.rotations.HEAD?.roll ?? 0
+      yaw: this.rotations.HEAD?.yaw?.value ?? 0,
+      pitch: this.rotations.HEAD?.pitch?.value ?? 0,
+      roll: this.rotations.HEAD?.roll?.value ?? 0
     };
   }
 

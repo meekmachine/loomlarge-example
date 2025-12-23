@@ -274,6 +274,27 @@ engine.getPaused(); // Check state
 - Head/Eye tracking snippets are generated with canonical names (`eyeHeadTracking/eyeYaw`, `headYaw`, etc.). When they reach the scheduler, it samples AU pairs (31/32, 33/54, 55/56, 61/62, 63/64) and calls `transitionContinuum`
 - Mix weights only apply to morph overlays. UI sliders can call `engine.setAUMixWeight` to bias toward morphs or bones
 
+## Continuum Pairs (Critical)
+
+For bidirectional controls (eyes left/right, head up/down, etc.), paired AUs share the **same bone axis**. This means:
+
+**⚠️ NEVER call `setAU` for both AUs in a pair** - the second call overwrites the first!
+
+```typescript
+// WRONG - second call overwrites bone rotation:
+engine.setAU(64, 0.5);  // Eyes down - sets pitch
+engine.setAU(63, 0);    // Eyes up - overwrites pitch to 0!
+
+// CORRECT - only call ONE AU based on direction:
+if (value < 0) {
+  engine.setAU(64, Math.abs(value));  // Eyes down
+} else {
+  engine.setAU(63, value);            // Eyes up
+}
+```
+
+The `setContinuum` and `transitionContinuum` methods handle this internally.
+
 ## File Structure
 
 ```

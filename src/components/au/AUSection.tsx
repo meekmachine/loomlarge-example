@@ -6,8 +6,25 @@ import DockableAccordionItem from './DockableAccordionItem';
 import AUSlider from './AUSlider';
 import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
-import { AUInfo } from '../../engine/arkit/shapeDict';
-import { EngineThree, CONTINUUM_PAIRS } from '../../engine/EngineThree';
+import { AUInfo, CONTINUUM_PAIRS_MAP } from '../../engine/arkit/shapeDict';
+import { EngineThree } from '../../engine/EngineThree';
+
+// Build CONTINUUM_PAIRS from CONTINUUM_PAIRS_MAP
+const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBlend: boolean }> = (() => {
+  const seen = new Set<string>();
+  const pairs: Array<{ negative: number; positive: number; showBlend: boolean }> = [];
+  for (const [auIdStr, info] of Object.entries(CONTINUUM_PAIRS_MAP)) {
+    const auId = Number(auIdStr);
+    if (info.isNegative) {
+      const key = `${auId}-${info.pairId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        pairs.push({ negative: auId, positive: info.pairId, showBlend: true });
+      }
+    }
+  }
+  return pairs;
+})();
 import type { NormalizedSnippet } from '../../latticework/animation/types';
 import { useEngineState } from '../../context/engineContext';
 

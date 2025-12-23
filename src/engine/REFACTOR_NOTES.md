@@ -308,3 +308,75 @@ Updated [engine/README.md](./README.md) with:
 ✅ **Fully backwards compatible** - all public API methods unchanged
 ✅ **No breaking changes** - existing code continues to work
 ✅ **TypeScript checks pass** - only pre-existing test errors remain
+
+---
+
+# Continuum Slider Fix - December 2024
+
+## Problem
+
+Continuum sliders (eyes horizontal, eyes vertical, head rotation, etc.) were not working correctly. The morph targets would activate but bone rotations would not work in one direction.
+
+## Root Cause
+
+Paired AUs (like AU 64 "eyes down" and AU 63 "eyes up") share the **same bone axis**. The old `setContinuum` implementation called `setAU` for BOTH AUs:
+
+```typescript
+// OLD (broken):
+setContinuum = (negAU, posAU, value) => {
+  const negVal = value < 0 ? Math.abs(value) : 0;
+  const posVal = value > 0 ? value : 0;
+  this.setAU(negAU, negVal);  // Sets bone rotation
+  this.setAU(posAU, posVal);  // OVERWRITES bone rotation!
+};
+```
+
+When slider was at -0.5 (eyes down):
+1. `setAU(64, 0.5)` → stores `rotations.EYE_L.pitch = 0.5`
+2. `setAU(63, 0)` → **overwrites** `rotations.EYE_L.pitch = 0`
+
+The second call clobbered the first!
+
+## Fix
+
+`setContinuum` now only calls `setAU` for ONE AU based on the sign:
+
+```typescript
+// NEW (fixed):
+setContinuum = (negAU, posAU, value) => {
+  if (value < 0) {
+    this.setAU(negAU, Math.abs(value));  // Only set negative AU
+  } else if (value > 0) {
+    this.setAU(posAU, value);            // Only set positive AU
+  } else {
+    this.setAU(posAU, 0);                // Zero out
+  }
+};
+```
+
+## Files Changed
+
+1. **`src/engine/EngineThree.ts`**
+   - Fixed `setContinuum` to only call ONE setAU based on sign
+   - `transitionContinuum` already uses `setContinuum`, so it's automatically fixed
+
+2. **`src/components/au/ContinuumSlider.tsx`**
+   - Changed from `engine.setContinuum()` to direct `engine.setAU()` calls
+   - UI now handles continuum logic directly
+
+3. **`src/latticework/animation/animationScheduler.ts`**
+   - Fixed `applyContinuumTargets` fallback paths to only call ONE AU
+
+## Key Insight
+
+For continuum pairs, you must NEVER call `setAU` for both AUs because they share the same bone axis. The bone can only store ONE value, so:
+- Negative slider value → activate negAU only
+- Positive slider value → activate posAU only
+- Zero → set either to 0 (they share the bone)
+
+## Testing
+
+- ✅ Eyes vertical slider: both directions rotate eye bones
+- ✅ Eyes horizontal slider: both directions rotate eye bones
+- ✅ Head sliders: both directions work
+- ✅ eyeRollCircular.json animation: eyes roll in circle

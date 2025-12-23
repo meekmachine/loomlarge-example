@@ -13,7 +13,6 @@ import type { LipSyncSnippet } from './lipSyncMachine';
 import type { VisemeEvent } from './types';
 import { phonemeExtractor } from './PhonemeExtractor';
 import { visemeMapper } from './VisemeMapper';
-import { getARKitVisemeIndex } from './visemeToARKit';
 
 export interface LipSyncHostCaps {
   scheduleSnippet: (snippet: any) => string | null;
@@ -138,8 +137,8 @@ export class LipSyncScheduler {
     const rampDownRatio = 0.40;     // Slower ramp down (40%) for smoother release
 
     visemeTimeline.forEach((visemeEvent, index) => {
-      const arkitIndex = getARKitVisemeIndex(visemeEvent.visemeId);
-      const curveKey = arkitIndex.toString();
+      // visemeEvent.visemeId is now already the ARKit index (0-14)
+      const curveKey = visemeEvent.visemeId.toString();
       const nominalStart = visemeEvent.offsetMs / 1000;
       const duration = visemeEvent.durationMs / 1000;
 

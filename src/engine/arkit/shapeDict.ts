@@ -79,6 +79,32 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
   70: ['Eye_R_Look_R'],
   71: ['Eye_R_Look_Up'],
   72: ['Eye_R_Look_Down'],
+
+  // Eye Occlusion morphs (CC_Base_EyeOcclusion meshes)
+  // These control the shadow/depth around the eyes
+  80: ['EO Bulge L', 'EO Bulge R'],
+  81: ['EO Depth L', 'EO Depth R'],
+  82: ['EO Inner Depth L', 'EO Inner Depth R'],
+  83: ['EO Inner Height L', 'EO Inner Height R'],
+  84: ['EO Inner Width L', 'EO Inner Width R'],
+  85: ['EO Outer Depth L', 'EO Outer Depth R'],
+  86: ['EO Outer Height L', 'EO Outer Height R'],
+  87: ['EO Outer Width L', 'EO Outer Width R'],
+  88: ['EO Upper Depth L', 'EO Upper Depth R'],
+  89: ['EO Lower Depth L', 'EO Lower Depth R'],
+  90: ['EO Center Upper Depth L', 'EO Center Upper Depth R'],
+  91: ['EO Center Upper Height L', 'EO Center Upper Height R'],
+  92: ['EO Center Lower Depth L', 'EO Center Lower Depth R'],
+  93: ['EO Center Lower Height L', 'EO Center Lower Height R'],
+  94: ['EO Inner Upper Depth L', 'EO Inner Upper Depth R'],
+  95: ['EO Inner Upper Height L', 'EO Inner Upper Height R'],
+  96: ['EO Inner Lower Depth L', 'EO Inner Lower Depth R'],
+  97: ['EO Inner Lower Height L', 'EO Inner Lower Height R'],
+  98: ['EO Outer Upper Depth L', 'EO Outer Upper Depth R'],
+  99: ['EO Outer Upper Height L', 'EO Outer Upper Height R'],
+  100: ['EO Outer Lower Depth L', 'EO Outer Lower Depth R'],
+  101: ['EO Outer Lower Height L', 'EO Outer Lower Height R'],
+  102: ['EO Duct Depth L', 'EO Duct Depth R'],
 };
 
 export const VISEME_KEYS: string[] = [
@@ -276,7 +302,7 @@ export interface AUInfo {
   muscularBasis?: string;
   links?: string[];
   faceArea?: 'Upper' | 'Lower'; // macro region
-  facePart?: 'Forehead' | 'Brow' | 'Eyelids' | 'Eyes' | 'Nose' | 'Cheeks' | 'Mouth' | 'Chin' | 'Jaw' | 'Head' | 'Tongue' | 'Other';
+  facePart?: 'Forehead' | 'Brow' | 'Eyelids' | 'Eyes' | 'EyeOcclusion' | 'Nose' | 'Cheeks' | 'Mouth' | 'Chin' | 'Jaw' | 'Head' | 'Tongue' | 'Other';
   faceSection?: string; // back-compat (mirror of facePart)
 }
 
@@ -348,6 +374,31 @@ export const AU_INFO: Record<string, AUInfo> = {
   '54': { id:'54', name:'Head Down',         faceArea:'Upper', facePart:'Head', faceSection:'Head' },
   '55': { id:'55', name:'Head Tilt Left',    faceArea:'Upper', facePart:'Head', faceSection:'Head' },
   '56': { id:'56', name:'Head Tilt Right',   faceArea:'Upper', facePart:'Head', faceSection:'Head' },
+
+  // Eye Occlusion (Upper) - controls shadow/depth around the eyes
+  '80': { id:'80', name:'Eye Bulge',              faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '81': { id:'81', name:'Eye Depth',              faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '82': { id:'82', name:'Eye Inner Depth',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '83': { id:'83', name:'Eye Inner Height',       faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '84': { id:'84', name:'Eye Inner Width',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '85': { id:'85', name:'Eye Outer Depth',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '86': { id:'86', name:'Eye Outer Height',       faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '87': { id:'87', name:'Eye Outer Width',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '88': { id:'88', name:'Eye Upper Depth',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '89': { id:'89', name:'Eye Lower Depth',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '90': { id:'90', name:'Eye Center Upper Depth', faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '91': { id:'91', name:'Eye Center Upper Height',faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '92': { id:'92', name:'Eye Center Lower Depth', faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '93': { id:'93', name:'Eye Center Lower Height',faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '94': { id:'94', name:'Eye Inner Upper Depth',  faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '95': { id:'95', name:'Eye Inner Upper Height', faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '96': { id:'96', name:'Eye Inner Lower Depth',  faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '97': { id:'97', name:'Eye Inner Lower Height', faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '98': { id:'98', name:'Eye Outer Upper Depth',  faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '99': { id:'99', name:'Eye Outer Upper Height', faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '100': { id:'100', name:'Eye Outer Lower Depth', faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '101': { id:'101', name:'Eye Outer Lower Height',faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
+  '102': { id:'102', name:'Eye Duct Depth',        faceArea:'Upper', facePart:'EyeOcclusion', faceSection:'EyeOcclusion' },
 };
 
 /** Default mix weights (0 = morph only, 1 = bone only) */

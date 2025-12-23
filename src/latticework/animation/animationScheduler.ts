@@ -649,21 +649,31 @@ export class AnimationScheduler {
           // Calculate continuum value: -1 (full negative) to +1 (full positive)
           const continuumValue = posValue - negValue;
 
+          // Only call ONE AU based on continuum sign
+          // (Calling both would overwrite the bone since they share the same axis)
           if (immediate) {
-            // Immediate mode (scrubbing): apply values directly without animation
-            this.host.applyAU(negAU, negValue);
-            this.host.applyAU(posAU, posValue);
+            // Immediate mode (scrubbing): apply value directly without animation
+            if (continuumValue < 0) {
+              this.host.applyAU(negAU, Math.abs(continuumValue));
+            } else {
+              this.host.applyAU(posAU, continuumValue);
+            }
           } else if (this.host.transitionContinuum) {
-            // Use transitionContinuum if available (handles both AUs as a single animated value)
-            // This ensures smooth interpolation through the full -1 to +1 range
+            // Use transitionContinuum if available
             this.host.transitionContinuum(negAU, posAU, continuumValue, durationMs);
           } else if (this.host.transitionAU) {
-            // Fallback: transition individual AUs (less smooth for continuums)
-            this.host.transitionAU(negAU, negValue, durationMs);
-            this.host.transitionAU(posAU, posValue, durationMs);
+            // Fallback: transition ONE AU based on sign
+            if (continuumValue < 0) {
+              this.host.transitionAU(negAU, Math.abs(continuumValue), durationMs);
+            } else {
+              this.host.transitionAU(posAU, continuumValue, durationMs);
+            }
           } else {
-            this.host.applyAU(negAU, negValue);
-            this.host.applyAU(posAU, posValue);
+            if (continuumValue < 0) {
+              this.host.applyAU(negAU, Math.abs(continuumValue));
+            } else {
+              this.host.applyAU(posAU, continuumValue);
+            }
           }
 
           processedContinuums.add(continuumKey);

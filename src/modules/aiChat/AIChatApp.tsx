@@ -21,7 +21,6 @@ import type { TTSService } from '../../latticework/tts/ttsService';
 import type { TranscriptionService } from '../../latticework/transcription/transcriptionService';
 import type { ConversationService } from '../../latticework/conversation/conversationService';
 import type { ConversationFlow } from '../../latticework/conversation/types';
-import { getJawAmountForViseme, getARKitVisemeIndex } from '../../latticework/lipsync/visemeToARKit';
 import { useModulesContext } from '../../context/ModulesContext';
 import Anthropic from '@anthropic-ai/sdk';
 
