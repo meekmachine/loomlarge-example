@@ -12,7 +12,7 @@ Collected notes from inspecting the top-level boot, engine context, and GLB scen
   - Creates `anim` via `createAnimationService(host)` and exposes it alongside `engine`, `clock`, and `addFrameListener`.
   - Host bindings map animation scheduler outputs to engine methods (`setAU`, `transitionAU`, morph setters, continuum helpers for eyes/head/jaw/tongue) and dispatch `visos:snippetEnd` events on completion.
   - Central frame loop: RAF-driven `tick` calls `anim.step(dt)` (scheduler), then notifies frame listeners, then advances `engine.update(dt)`.
-  - Puts `window.facslib` and `window.anim` dev handles on the page for debugging.
+- Puts `window.engine` and `window.anim` dev handles on the page for debugging.
 
 ## Scene Setup (GLB)
 - `src/scenes/CharacterGLBScene.tsx`:

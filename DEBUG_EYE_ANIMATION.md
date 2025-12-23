@@ -12,8 +12,8 @@
 ```javascript
 // Check if eye bones were found
 console.log('Eye bones:', {
-  leftEye: facslib.bones.EYE_L,
-  rightEye: facslib.bones.EYE_R
+leftEye: engine.bones.EYE_L,
+rightEye: engine.bones.EYE_R
 });
 
 // Should show objects with { obj, basePos, baseQuat, baseEuler }
@@ -25,10 +25,10 @@ console.log('Eye bones:', {
 ```javascript
 // Check current mix weights for eye AUs
 console.log('Eye mix weights:', {
-  AU61: facslib.getAUMixWeight(61),  // Left
-  AU62: facslib.getAUMixWeight(62),  // Right
-  AU63: facslib.getAUMixWeight(63),  // Up
-  AU64: facslib.getAUMixWeight(64)   // Down
+  AU61: engine.getAUMixWeight(61),  // Left
+  AU62: engine.getAUMixWeight(62),  // Right
+  AU63: engine.getAUMixWeight(63),  // Up
+  AU64: engine.getAUMixWeight(64)   // Down
 });
 
 // Should be 0.5 (50% bone, 50% morph)
@@ -39,10 +39,10 @@ console.log('Eye mix weights:', {
 
 ```javascript
 // Try 100% bone control
-facslib.setAUMixWeight(61, 1.0);
-facslib.setAUMixWeight(62, 1.0);
-facslib.setAUMixWeight(63, 1.0);
-facslib.setAUMixWeight(64, 1.0);
+engine.setAUMixWeight(61, 1.0);
+engine.setAUMixWeight(62, 1.0);
+engine.setAUMixWeight(63, 1.0);
+engine.setAUMixWeight(64, 1.0);
 
 // Then test animation
 anim.loadFromLocal('eyeHeadTrackingAnimationsList/eyeYaw_fullRange');
@@ -53,18 +53,18 @@ anim.play();
 
 ```javascript
 // Test horizontal (should move eyes left/right)
-facslib.setEyesHorizontal(-1.0);  // Full left
+engine.setEyesHorizontal(-1.0);  // Full left
 await new Promise(r => setTimeout(r, 500));
-facslib.setEyesHorizontal(0.0);   // Neutral
+engine.setEyesHorizontal(0.0);   // Neutral
 await new Promise(r => setTimeout(r, 500));
-facslib.setEyesHorizontal(1.0);   // Full right
+engine.setEyesHorizontal(1.0);   // Full right
 
 // Test vertical (should move eyes up/down)
-facslib.setEyesVertical(-1.0);  // Full down
+engine.setEyesVertical(-1.0);  // Full down
 await new Promise(r => setTimeout(r, 500));
-facslib.setEyesVertical(0.0);   // Neutral
+engine.setEyesVertical(0.0);   // Neutral
 await new Promise(r => setTimeout(r, 500));
-facslib.setEyesVertical(1.0);   // Full up
+engine.setEyesVertical(1.0);   // Full up
 ```
 
 ### 5. Check Animation Scheduler Logs
@@ -81,8 +81,8 @@ If you don't see these, the continuum detection isn't working.
 
 ```javascript
 // After moving eyes, check if bones rotated
-const leftEye = facslib.bones.EYE_L?.obj;
-const rightEye = facslib.bones.EYE_R?.obj;
+const leftEye = engine.bones.EYE_L?.obj;
+const rightEye = engine.bones.EYE_R?.obj;
 
 console.log('Left eye rotation:', leftEye?.rotation);
 console.log('Right eye rotation:', rightEye?.rotation);
@@ -94,12 +94,12 @@ console.log('Right eye rotation:', rightEye?.rotation);
 
 ### Issue: Bones Not Found
 
-**Symptoms**: `facslib.bones.EYE_L` is `undefined`
+**Symptoms**: `engine.bones.EYE_L` is `undefined`
 
 **Fix**: Check model bone names
 ```javascript
 // List all bones in model
-facslib.model?.traverse((child) => {
+engine.model?.traverse((child) => {
   if (child.type === 'Bone') {
     console.log('Bone:', child.name);
   }
@@ -116,10 +116,10 @@ facslib.model?.traverse((child) => {
 **Fix**: Set mix weight manually
 ```javascript
 // Set to 0.5 (50/50 bone and morph)
-facslib.setAUMixWeight(61, 0.5);
-facslib.setAUMixWeight(62, 0.5);
-facslib.setAUMixWeight(63, 0.5);
-facslib.setAUMixWeight(64, 0.5);
+engine.setAUMixWeight(61, 0.5);
+engine.setAUMixWeight(62, 0.5);
+engine.setAUMixWeight(63, 0.5);
+engine.setAUMixWeight(64, 0.5);
 ```
 
 ### Issue: Wrong Axis Configuration
@@ -149,7 +149,7 @@ export const EYE_AXIS = {
 **Debug**:
 ```javascript
 // Check if down morph exists
-const morphDict = facslib.meshes[0]?.morphTargetDictionary;
+const morphDict = engine.meshes[0]?.morphTargetDictionary;
 console.log('Down morphs:', {
   'Eye_L_Look_Down': morphDict?.['Eye_L_Look_Down'],
   'Eye_R_Look_Down': morphDict?.['Eye_R_Look_Down'],
@@ -158,7 +158,7 @@ console.log('Down morphs:', {
 });
 
 // Test down movement directly
-facslib.setAU(64, 1.0);  // Should make eyes look down
+engine.setAU(64, 1.0);  // Should make eyes look down
 ```
 
 ### Issue: Pitch Inverted
@@ -171,8 +171,8 @@ facslib.setAU(64, 1.0);  // Should make eyes look down
 // If it's backwards, the issue is in applyCompositeMotion
 
 // Test:
-facslib.setEyesVertical(1.0);   // Should look UP
-facslib.setEyesVertical(-1.0);  // Should look DOWN
+engine.setEyesVertical(1.0);   // Should look UP
+engine.setEyesVertical(-1.0);  // Should look DOWN
 ```
 
 ## Quick Fix Script
@@ -185,20 +185,20 @@ async function diagnoseEyes() {
 
   // 1. Check bones
   console.log('\n1. Eye Bones:', {
-    left: !!facslib.bones.EYE_L,
-    right: !!facslib.bones.EYE_R
+    left: !!engine.bones.EYE_L,
+    right: !!engine.bones.EYE_R
   });
 
   // 2. Check mix weights
   console.log('\n2. Mix Weights:', {
-    AU61: facslib.getAUMixWeight(61),
-    AU62: facslib.getAUMixWeight(62),
-    AU63: facslib.getAUMixWeight(63),
-    AU64: facslib.getAUMixWeight(64)
+    AU61: engine.getAUMixWeight(61),
+    AU62: engine.getAUMixWeight(62),
+    AU63: engine.getAUMixWeight(63),
+    AU64: engine.getAUMixWeight(64)
   });
 
   // 3. Check morphs
-  const dict = facslib.meshes[0]?.morphTargetDictionary;
+  const dict = engine.meshes[0]?.morphTargetDictionary;
   console.log('\n3. Eye Morphs Exist:', {
     lookLeft: !!dict?.['Eye_L_Look_L'] || !!dict?.['eyeLookLeftLeft'],
     lookRight: !!dict?.['Eye_L_Look_R'] || !!dict?.['eyeLookRightLeft'],
@@ -208,19 +208,19 @@ async function diagnoseEyes() {
 
   // 4. Test horizontal movement
   console.log('\n4. Testing horizontal...');
-  facslib.setEyesHorizontal(-1.0);
+  engine.setEyesHorizontal(-1.0);
   await new Promise(r => setTimeout(r, 1000));
-  facslib.setEyesHorizontal(1.0);
+  engine.setEyesHorizontal(1.0);
   await new Promise(r => setTimeout(r, 1000));
-  facslib.setEyesHorizontal(0.0);
+  engine.setEyesHorizontal(0.0);
 
   // 5. Test vertical movement
   console.log('\n5. Testing vertical...');
-  facslib.setEyesVertical(-1.0);
+  engine.setEyesVertical(-1.0);
   await new Promise(r => setTimeout(r, 1000));
-  facslib.setEyesVertical(1.0);
+  engine.setEyesVertical(1.0);
   await new Promise(r => setTimeout(r, 1000));
-  facslib.setEyesVertical(0.0);
+  engine.setEyesVertical(0.0);
 
   console.log('\n=== Diagnostic Complete ===');
   console.log('Did eyes move? Check above for issues.');

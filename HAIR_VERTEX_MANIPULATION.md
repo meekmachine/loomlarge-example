@@ -152,7 +152,7 @@ engine.applyHairVertexShader('Side_part_wavy', shaderCode);
 
 ```javascript
 // Access engine globally
-const { engine } = window.facslib;
+const engine = window.engine;
 
 let time = 0;
 function animateWind() {
@@ -278,7 +278,7 @@ Quick tests you can run in the browser console:
 
 ```javascript
 // Get engine reference
-const engine = window.facslib.engine;
+const engine = window.engine;
 
 // Test 1: Simple wave
 engine.applyHairWaveEffect('Side_part_wavy', { amplitude: 0.3 });

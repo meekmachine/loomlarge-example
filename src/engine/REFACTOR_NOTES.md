@@ -273,6 +273,250 @@ class EngineThree {
     this.mixer.update(deltaSeconds);
   }
 }
+
+---
+
+# EngineThree Refactor - AU-Only Core & Hair Removal (January 2025)
+
+## Summary
+
+This refactor tightens EngineThree around the **AU + viseme** core, eliminates legacy hair and eye-occlusion wiring from the engine, and moves AU/bone metadata into `shapeDict` and `EngineThree.types` so the engine no longer hardcodes that knowledge.
+
+The two primary flows – `setAU` and `transitionAU` – are now the main focus. Both flows:
+
+- Read **what** to do from `shapeDict` (`AU_TO_MORPHS`, `BONE_AU_TO_BINDINGS`, `MIXED_AUS`).
+- Apply morphs **only** on a single face mesh (`CC_Base_Body_1`).
+- Apply bones via a unified **per-axis rotation state** (`pitch/yaw/roll`) and a single composite quaternion per bone.
+
+Hair is removed from EngineThree and the UI for now; it can be resurrected later from git history.
+
+## Changes Made
+
+### 1. AU Morphs Only Touch the Face Mesh
+
+**Before:**
+
+- `setAU` / `applyBothSides` / `applyMorphs` would scan `this.meshes` and conditionally write morph influences across multiple meshes.
+- `setMorph` also iterated over all meshes, with special-case filters for occlusion/tearLine names.
+- This made AU morph writes:
+  - Slower (O(#meshes) per AU update).
+  - Harder to reason about (which mesh actually owns a given morph).
+
+**After:**
+
+- EngineThree resolves a single **face mesh** once in `onReady`:
+
+  ```ts
+  const defaultFace = meshes.find(m => m.name === 'CC_Base_Body_1');
+  if (defaultFace) {
+    this.faceMeshName = defaultFace.name;
+    this.faceMesh = defaultFace;
+  } else {
+    const candidate = meshes.find((m) => {
+      const dict: any = (m as any).morphTargetDictionary;
+      return dict && typeof dict === 'object' && 'Brow_Drop_L' in dict;
+    });
+    this.faceMeshName = candidate?.name || null;
+    this.faceMesh = candidate || null;
+  }
+  ```
+
+- `setMorph`, `getMorphValue`, and `applyMorphs` use `this.faceMesh` directly:
+
+  - `getMorphValue(key)`:
+    - Reads from `faceMesh.morphTargetDictionary` / `morphTargetInfluences`.
+    - Falls back to scanning `this.meshes` only for non-face/unknown morphs.
+
+  - `setMorph(key, v)`:
+    - Writes `infl[idx] = v` on the face mesh for AU/viseme morphs.
+    - Fallback scan remains only as a safety net.
+
+  - `applyMorphs(keys, v)`:
+    - Writes all AU morph keys to the face mesh and returns.
+    - No more “legacy behavior: scan all meshes”.
+
+**Why:**
+
+- All AU / viseme morphs in this rig live on `CC_Base_Body_1`.
+- This matches what the GLTF actually contains (`targetNames` on the body meshes).
+- AU morph writes are now predictable and cheap: one mesh, one dictionary.
+
+### 2. AU/Bone Metadata Moved to `shapeDict`
+
+**Before:**
+
+- EngineThree computed:
+  - `MIXED_AUS` – AUs that have both morphs and bones.
+  - `hasLeftRightMorphs(auId)` – infers bilateral AUs from morph key suffixes.
+- These were exported from EngineThree and imported by the UI slider (`AUSlider`).
+
+**After:**
+
+- `src/engine/arkit/shapeDict.ts` now exports:
+
+  ```ts
+  export const MIXED_AUS = new Set(
+    Object.keys(AU_TO_MORPHS)
+      .map(Number)
+      .filter(id => AU_TO_MORPHS[id]?.length && BONE_AU_TO_BINDINGS[id]?.length)
+  );
+
+  export const hasLeftRightMorphs = (auId: number): boolean => {
+    const keys = AU_TO_MORPHS[auId] || [];
+    return keys.some(k => /_L$|_R$|Left$|Right$/.test(k));
+  };
+  ```
+
+- EngineThree and `AUSlider` import these directly from `shapeDict`.
+
+**Why:**
+
+- AU metadata (“does this AU have bones? morphs? L/R?”) belongs next to the mappings, not in the engine implementation.
+- The UI and engine now share one canonical definition of `MIXED_AUS` and bilateral AUs.
+
+### 3. Bone Types Moved Into `EngineThree.types.ts`
+
+**Before:**
+
+- `EngineThree.ts` declared its own internal types:
+
+  ```ts
+  type BoneKeys = 'EYE_L' | 'EYE_R' | 'JAW' | 'HEAD' | 'NECK' | 'TONGUE';
+
+  type NodeBase = {
+    obj: THREE.Object3D;
+    basePos: THREE.Vector3;
+    baseQuat: THREE.Quaternion;
+    baseEuler: THREE.Euler;
+  };
+
+  type ResolvedBones = Partial<Record<BoneKeys, NodeBase>>;
+  ```
+
+- Method signatures hardcoded bone unions (e.g. `applyCompositeRotation(nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE')`).
+
+**After:**
+
+- `src/engine/EngineThree.types.ts` now owns the bone types:
+
+  ```ts
+  export type BoneKey = 'EYE_L' | 'EYE_R' | 'JAW' | 'HEAD' | 'NECK' | 'TONGUE';
+
+  export type NodeBase = {
+    obj: THREE.Object3D;
+    basePos: THREE.Vector3;
+    baseQuat: THREE.Quaternion;
+    baseEuler: THREE.Euler;
+  };
+
+  export type ResolvedBones = Partial<Record<BoneKey, NodeBase>>;
+  ```
+
+- `EngineThree.ts` imports them:
+
+  ```ts
+  import type { TransitionHandle, ResolvedBones, BoneKey } from './EngineThree.types';
+  ```
+
+- `applyCompositeRotation` now accepts `nodeKey: BoneKey`, not a repeated string union.
+
+**Why:**
+
+- Keeps `EngineThree.ts` focused on behavior, not type definitions.
+- Reduces duplication and the risk of unions drifting apart.
+
+### 4. Bone Rotation State Ready to Generalize
+
+**Before:**
+
+- `rotations` was initialized with a hardcoded object:
+
+  ```ts
+  private rotations: Record<string, Record<'pitch' | 'yaw' | 'roll', { value: number; maxDegrees: number }>> = {
+    JAW: { ... },
+    HEAD: { ... },
+    EYE_L: { ... },
+    EYE_R: { ... },
+    TONGUE: { ... }
+  };
+  ```
+
+- `applyCompositeRotation` only accepted a hard-coded union of composite bones.
+
+**After (partial):**
+
+- `rotations` starts empty:
+
+  ```ts
+  private rotations: Record<string, Record<'pitch' | 'yaw' | 'roll', { value: number; maxDegrees: number }>> = {};
+  ```
+
+- `applyCompositeRotation(nodeKey: BoneKey)` now takes a typed `BoneKey`.
+
+- Existing code still populates rotations lazily via `updateBoneRotation`, but the structure is ready for the next step:
+  - Pre-populate rotation state for **any bone that appears in `BONE_AU_TO_BINDINGS`**.
+  - Treat all AU-driven bones as “composite” (per-axis state + final quaternion), not just a hardcoded subset.
+
+**Why:**
+
+- Moves toward a single, consistent way to apply AU-driven bone rotations:
+  - per-axis update → composite quaternion → apply once.
+- Avoids different code paths for “special” vs. “non-special” bones.
+
+### 5. Hair System Removed From Engine and UI
+
+**Before:**
+
+- EngineThree contained:
+  - Hair registration (`registeredHairObjects`, `getRegisteredHairObjects`, `registerHairObjects`).
+  - Hair color/outline methods (`setHairColor`, `setHairOutline`, `applyHairStateToObject`).
+  - Hair physics and wind/idle drivers (`setHairPhysicsEnabled`, `setHairPhysicsConfig`, `updateHairWindIdle`, `updateHairForHeadChange`, `transitionHairMorph`, hair morph value helpers).
+- `HairService` (`src/latticework/hair/hairService.ts`) coordinated state with EngineThree.
+- UI components:
+  - `HairSection` (AU panel).
+  - `HairCustomizationPanel`.
+  - Hair tab in `SliderDrawer`.
+
+**After:**
+
+- **EngineThree:**
+  - All hair-related fields and methods have been removed.
+  - `setupMeshRenderOrder` still uses `CC4_MESHES` for render layering (eyes vs. body vs. hair), but does not keep any hair-specific registries or morph logic.
+
+- **Latticework + UI:**
+  - Deleted:
+    - `src/latticework/hair/hairService.ts`
+    - `src/components/hair/HairCustomizationPanel.tsx`
+    - `src/components/au/HairSection.tsx`
+  - Updated `src/components/SliderDrawer.tsx`:
+    - Removed import of `HairSection`.
+    - Removed `'hair'` tab from the `TabId` union and `TABS` list.
+    - Removed the `HairTabContent` component and `FaCut` icon wiring.
+
+**Why:**
+
+- Hair is not part of the current app flow; leaving it half-wired introduces noise and complexity.
+- Removing it completely makes the AU core and bone mixing behavior much easier to reason about.
+- All hair logic remains available in git history for a future reintroduction.
+
+## Remaining Follow-Ups
+
+These are intentional next steps, not yet implemented in this refactor:
+
+1. **Generalize Bone Rotation for All AU-Driven Bones**
+   - Derive the set of bones to track from `BONE_AU_TO_BINDINGS` (or export a `BONE_KEYS` helper from `shapeDict`).
+   - Initialize `rotations` for each of those, and ensure `updateBoneRotation` + `applyCompositeRotation` are used consistently for all of them.
+
+2. **Finish Type Cleanup**
+   - Move any remaining inline type aliases from `EngineThree.ts` into `EngineThree.types.ts`.
+   - Ensure UI components import AU/bone metadata from `shapeDict` rather than `EngineThree`.
+
+3. **Dedicated Eye-Occlusion & Clothing APIs**
+   - Eye-occlusion (`EO ...`) and tear line morphs (`TL ...`) should get their own dedicated setters/transitions, instead of going through the AU flow.
+   - Same for clothing morphs when they are brought online.
+
+4. **Remove Any Leftover Legacy Comments/Paths**
+   - There are still references to older approaches in comments and docs that can be pruned once the bone rotation generalization is complete.
 ```
 
 **Benefits:**

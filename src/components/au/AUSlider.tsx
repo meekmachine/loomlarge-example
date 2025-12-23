@@ -8,7 +8,8 @@ import {
   VStack,
   HStack
 } from '@chakra-ui/react';
-import { EngineThree, MIXED_AUS, hasLeftRightMorphs } from '../../engine/EngineThree';
+import { EngineThree } from '../../engine/EngineThree';
+import { MIXED_AUS, hasLeftRightMorphs } from '../../engine/arkit/shapeDict';
 
 interface AUSliderProps {
   au: string | number;

@@ -214,6 +214,19 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
   ],
 };
 
+/** AUs that have both morphs and bones - can blend between them */
+export const MIXED_AUS = new Set(
+  Object.keys(AU_TO_MORPHS)
+    .map(Number)
+    .filter(id => AU_TO_MORPHS[id]?.length && BONE_AU_TO_BINDINGS[id]?.length)
+);
+
+/** Check if an AU has separate left/right morphs */
+export const hasLeftRightMorphs = (auId: number): boolean => {
+  const keys = AU_TO_MORPHS[auId] || [];
+  return keys.some(k => /_L$|_R$|Left$|Right$/.test(k));
+};
+
 /**
  * COMPOSITE_ROTATIONS - Defines unified rotation axes for bones that need
  * pitch/yaw/roll tracked together to prevent overwriting.

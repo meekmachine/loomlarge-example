@@ -26,6 +26,19 @@ export type TransitionHandle = {
   cancel: () => void;
 };
 
+// Bone-related engine types
+
+export type BoneKey = 'EYE_L' | 'EYE_R' | 'JAW' | 'HEAD' | 'NECK' | 'TONGUE';
+
+export type NodeBase = {
+  obj: THREE.Object3D;
+  basePos: THREE.Vector3;
+  baseQuat: THREE.Quaternion;
+  baseEuler: THREE.Euler;
+};
+
+export type ResolvedBones = Partial<Record<BoneKey, NodeBase>>;
+
 /**
  * Engine - The 3D rendering engine interface (EngineThree)
  *

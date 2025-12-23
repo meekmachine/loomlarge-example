@@ -50,7 +50,7 @@ export const ThreeProvider: React.FC<React.PropsWithChildren> = ({ children }) =
   if (!engineRef.current) {
     engineRef.current = new EngineThree();
     if (typeof window !== 'undefined') {
-      (window as any).facslib = engineRef.current;
+      (window as any).engine = engineRef.current;
     }
   }
 

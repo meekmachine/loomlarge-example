@@ -17,7 +17,6 @@ import AUSection from './au/AUSection';
 import VisemeSection from './au/VisemeSection';
 import TTSSection from './au/TTSSection';
 import EyeHeadTrackingSection from './au/EyeHeadTrackingSection';
-import HairSection from './au/HairSection';
 import BlinkSection from './au/BlinkSection';
 import DockableAccordionItem from './au/DockableAccordionItem';
 import PlaybackControls from './PlaybackControls';
@@ -110,7 +109,7 @@ const tabStyles = `
 `;
 
 // Tab definitions
-type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
+type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'meshes' | 'skybox';
 
 interface TabDef {
   id: TabId;
@@ -125,7 +124,6 @@ const TABS: TabDef[] = [
   { id: 'aus', icon: FaSmile, label: 'Action Units' },
   { id: 'visemes', icon: FaComment, label: 'Visemes' },
   { id: 'tracking', icon: FaEye, label: 'Eye & Head' },
-  { id: 'hair', icon: FaCut, label: 'Hair' },
   { id: 'meshes', icon: FaCubes, label: 'Meshes' },
   { id: 'skybox', icon: FaGlobe, label: 'Skybox' },
 ];
@@ -170,7 +168,6 @@ const TAB_ICONS: Record<TabId, React.ReactNode> = {
   aus: <FaSmile />,
   visemes: <FaComment />,
   tracking: <FaEye />,
-  hair: <FaCut />,
   meshes: <FaCubes />,
   skybox: <FaGlobe />,
 };
@@ -248,11 +245,6 @@ const BlinkTabContent = memo(({ disabled }: { disabled: boolean }) => (
 // Tracking Tab
 const TrackingTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) => (
   <EyeHeadTrackingSection engine={engine} disabled={disabled} defaultExpanded />
-));
-
-// Hair Tab
-const HairTabContent = memo(({ disabled }: { disabled: boolean }) => (
-  <HairSection disabled={disabled} defaultExpanded />
 ));
 
 // Meshes Tab

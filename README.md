@@ -382,7 +382,7 @@ Load test animations in the browser console:
 
 ```javascript
 // Global handles (auto-exposed in dev mode)
-window.facslib  // EngineThree instance
+window.engine   // EngineThree instance
 window.anim     // Animation service
 
 // Load and play a snippet
@@ -544,7 +544,7 @@ class EngineThree {
 
 1. **Check engine initialization**:
    ```javascript
-   console.log(window.facslib); // Should show EngineThree instance
+   console.log(window.engine); // Should show EngineThree instance
    ```
 
 2. **Verify service startup**:

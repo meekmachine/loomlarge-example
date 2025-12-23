@@ -1,14 +1,4 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { GlitchPass } from 'three/examples/jsm/postprocessing/GlitchPass.js';
-import { HalftonePass } from 'three/examples/jsm/postprocessing/HalftonePass.js';
-import { DotScreenPass } from 'three/examples/jsm/postprocessing/DotScreenPass.js';
-import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
-import { SepiaShader } from 'three/examples/jsm/shaders/SepiaShader.js';
 import {
   AU_TO_MORPHS,
   BONE_AU_TO_BINDINGS,
@@ -18,49 +8,8 @@ import {
   CC4_MESHES,
   VISEME_KEYS,
 } from './arkit/shapeDict';
-import type { TransitionHandle } from './EngineThree.types';
+import type { TransitionHandle, ResolvedBones, BoneKey } from './EngineThree.types';
 import { ThreeAnimation } from './ThreeAnimation';
-
-// Post-processing effect types
-export type PostEffect =
-  | 'none'
-  | 'bloom'
-  | 'film'
-  | 'glitch'
-  | 'halftone'
-  | 'dotScreen'
-  | 'vignette'
-  | 'sepia';
-
-// Effect parameter types
-export type BloomParams = { strength: number; radius: number; threshold: number };
-export type FilmParams = { intensity: number };
-export type GlitchParams = { wild: boolean };
-export type HalftoneParams = { radius: number; scatter: number; greyscale: boolean };
-export type DotScreenParams = { scale: number; angle: number };
-export type VignetteParams = { offset: number; darkness: number };
-export type SepiaParams = { amount: number };
-
-export type EffectParams = {
-  bloom: BloomParams;
-  film: FilmParams;
-  glitch: GlitchParams;
-  halftone: HalftoneParams;
-  dotScreen: DotScreenParams;
-  vignette: VignetteParams;
-  sepia: SepiaParams;
-};
-
-// Default effect parameters
-export const DEFAULT_EFFECT_PARAMS: EffectParams = {
-  bloom: { strength: 0.5, radius: 0.4, threshold: 0.85 },
-  film: { intensity: 0.35 },
-  glitch: { wild: false },
-  halftone: { radius: 4, scatter: 0, greyscale: false },
-  dotScreen: { scale: 0.8, angle: 0.5 },
-  vignette: { offset: 1.0, darkness: 1.2 },
-  sepia: { amount: 0.9 },
-};
 
 // ============================================================================
 // DERIVED CONSTANTS - computed from shapeDict core data
@@ -68,36 +17,14 @@ export const DEFAULT_EFFECT_PARAMS: EffectParams = {
 
 /** All AU IDs that have bone bindings */
 export const BONE_DRIVEN_AUS = new Set(Object.keys(BONE_AU_TO_BINDINGS).map(Number));
-
-
-/** AUs that have both morphs and bones - can blend between them */
-export const MIXED_AUS = new Set(
-  Object.keys(AU_TO_MORPHS)
-    .map(Number)
-    .filter(id => AU_TO_MORPHS[id]?.length && BONE_AU_TO_BINDINGS[id]?.length)
-);
-
-/** Check if an AU has separate left/right morphs */
-export const hasLeftRightMorphs = (auId: number): boolean => {
-  const keys = AU_TO_MORPHS[auId] || [];
-  return keys.some(k => /_L$|_R$|Left$|Right$/.test(k));
-};
-
 const X_AXIS = new THREE.Vector3(1,0,0);
 const Y_AXIS = new THREE.Vector3(0,1,0);
 const Z_AXIS = new THREE.Vector3(0,0,1);
 const deg2rad = (d: number) => (d * Math.PI) / 180;
 
-type BoneKeys = 'EYE_L' | 'EYE_R' | 'JAW' | 'HEAD' | 'NECK' | 'TONGUE';
+// Candidate mesh names for most face-related morphs (face, viseme, tongue, hair)
+const FACE_MESH_NAME_DEFAULT = 'CC_Base_Body_1';
 
-type NodeBase = {
-  obj: THREE.Object3D;
-  basePos: THREE.Vector3;
-  baseQuat: THREE.Quaternion;
-  baseEuler: THREE.Euler;
-};
-
-type ResolvedBones = Partial<Record<BoneKeys, NodeBase>>;
 export class EngineThree {
   private auValues: Record<number, number> = {};
 
@@ -112,26 +39,17 @@ export class EngineThree {
   private renderer: THREE.WebGLRenderer | null = null;
   private skyboxTexture: THREE.Texture | null = null;
 
-
-  // Post-processing
-  private composer: EffectComposer | null = null;
-  private currentEffect: PostEffect = 'none';
-  private effectPass: Pass | null = null;
-  private effectParams: EffectParams = { ...DEFAULT_EFFECT_PARAMS };
-
   // Unified rotation state tracking for bones
   // Each axis stores value (signed, with scale applied) and maxDegrees for rendering
-  private rotations: Record<string, Record<'pitch' | 'yaw' | 'roll', { value: number; maxDegrees: number }>> = {
-    JAW: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
-    HEAD: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
-    EYE_L: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
-    EYE_R: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } },
-    TONGUE: { pitch: { value: 0, maxDegrees: 0 }, yaw: { value: 0, maxDegrees: 0 }, roll: { value: 0, maxDegrees: 0 } }
-  };
+  private rotations: Record<string, Record<'pitch' | 'yaw' | 'roll', { value: number; maxDegrees: number }>> = {};
 
   // Nodes with pending rotation changes - applied once per frame in update()
   private pendingCompositeNodes = new Set<string>();
   private isPaused: boolean = false;
+
+  // Primary face mesh used for all AU and viseme morphs (CC_Base_Body_1)
+  private faceMeshName: string | null = FACE_MESH_NAME_DEFAULT;
+  private faceMesh: THREE.Mesh | null = null;
 
   // ============================================================================
   // INTERNAL RAF LOOP - EngineThree owns the frame loop
@@ -188,6 +106,17 @@ export class EngineThree {
   // No constructor needed - all state is initialized inline
 
   private getMorphValue(key: string): number {
+    // Prefer the primary face mesh for AU/viseme morphs
+    if (this.faceMesh) {
+      const dict: any = (this.faceMesh as any).morphTargetDictionary;
+      const infl: any = (this.faceMesh as any).morphTargetInfluences;
+      if (dict && infl) {
+        const idx = dict[key];
+        if (idx !== undefined) return infl[idx] ?? 0;
+      }
+    }
+
+    // Fallback: scan all meshes (for non-face or unknown morphs)
     for (const m of this.meshes) {
       const dict: any = (m as any).morphTargetDictionary;
       const infl: any = (m as any).morphTargetInfluences;
@@ -195,6 +124,7 @@ export class EngineThree {
       const idx = dict[key];
       if (idx !== undefined) return infl[idx] ?? 0;
     }
+
     return 0;
   }
   /**
@@ -358,43 +288,6 @@ export class EngineThree {
     return this.transitionMorph(morphKey, to, durationMs);
   };
 
-  /**
-   * Set a continuum AU pair immediately (no animation).
-   * Only calls setAU for ONE AU based on sign to avoid bone overwrite.
-   */
-  setContinuum = (negAU: number, posAU: number, continuumValue: number) => {
-    const value = Math.max(-1, Math.min(1, continuumValue));
-
-    if (value < 0) {
-      this.setAU(negAU, Math.abs(value));
-    } else if (value > 0) {
-      this.setAU(posAU, value);
-    } else {
-      this.setAU(posAU, 0);
-    }
-  };
-
-  /**
-   * Smoothly transition a continuum AU pair.
-   * Only calls setAU for ONE AU based on sign to avoid bone overwrite.
-   */
-  transitionContinuum = (negAU: number, posAU: number, continuumValue: number, durationMs = 200): TransitionHandle => {
-    const target = Math.max(-1, Math.min(1, continuumValue));
-    const driverKey = `continuum_${negAU}_${posAU}`;
-
-    const currentNeg = this.auValues[negAU] ?? 0;
-    const currentPos = this.auValues[posAU] ?? 0;
-    const currentContinuum = currentPos - currentNeg;
-
-    return this.addTransition(
-      driverKey,
-      currentContinuum,
-      target,
-      durationMs,
-      (value) => this.setContinuum(negAU, posAU, value)
-    );
-  };
-
   /** Advance internal transition tweens by deltaSeconds (called from ThreeProvider RAF loop). */
   update(deltaSeconds: number) {
     const dtSeconds = Math.max(0, deltaSeconds || 0);
@@ -404,29 +297,18 @@ export class EngineThree {
     this.animation.tick(dtSeconds);
 
     // Flush pending composite rotations (deferred from setAU calls)
-    // Also triggers hair updates when HEAD changes
     this.flushPendingComposites();
-
-    // Wind/idle hair animations (only when enabled)
-    this.updateHairWindIdle(dtSeconds);
   }
 
   /** Apply all pending composite rotations and clear the set */
   private flushPendingComposites() {
     if (this.pendingCompositeNodes.size === 0) return;
 
-    // Check if HEAD changed - triggers hair physics update
-    const headChanged = this.pendingCompositeNodes.has('HEAD');
-
     for (const nodeKey of this.pendingCompositeNodes) {
       this.applyCompositeRotation(nodeKey as 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE');
     }
     this.pendingCompositeNodes.clear();
 
-    // Update hair when head rotation changes
-    if (headChanged && this.hairPhysicsEnabled) {
-      this.updateHairForHeadChange();
-    }
   }
 
   /**
@@ -481,32 +363,7 @@ export class EngineThree {
   private model: THREE.Object3D | null = null;
   // Cache: object name → array of matching objects (avoids repeated traversals)
   private objectNameCache = new Map<string, THREE.Object3D[]>();
-  // Direct reference to registered hair objects (avoids model lookup race condition)
-  private registeredHairObjects = new Map<string, THREE.Object3D>();
-
-  // Hair physics state - spring-damper simulation for secondary motion
-  private hairPhysicsEnabled = false;
-  private hairPhysicsConfig = {
-    stiffness: 7.5,
-    damping: 0.18,
-    inertia: 3.5,
-    gravity: 12,
-    responseScale: 2.5,
-    idleSwayAmount: 0.12,
-    idleSwaySpeed: 1.0,
-    windStrength: 0,
-    windDirectionX: 1.0,
-    windDirectionZ: 0,
-    windTurbulence: 0.3,
-    windFrequency: 1.4,
-  };
-  // State for wind/idle animations (these need continuous updates)
-  private hairWindIdleState = {
-    windTime: 0,
-    idlePhase: 0,
-    smoothedWindX: 0,
-    smoothedWindZ: 0,
-  };
+  // Hair system removed for now.
 
   /** Get all mesh info for UI display (traverses full model, not just morph meshes) */
   getMeshList = (): Array<{ name: string; visible: boolean; category: string; morphCount: number }> => {
@@ -650,21 +507,34 @@ export class EngineThree {
 
   hasBoneBinding = (id: number) => BONE_DRIVEN_AUS.has(id);
 
-  onReady = ({ meshes, model, scene, renderer, skyboxTexture, composer }: {
+  onReady = ({ meshes, model, scene, renderer, skyboxTexture }: {
     meshes: THREE.Mesh[];
     model?: THREE.Object3D;
     scene?: THREE.Scene;
     renderer?: THREE.WebGLRenderer;
     skyboxTexture?: THREE.Texture;
-    composer?: EffectComposer;
   }) => {
     this.meshes = meshes;
     this.objectNameCache.clear();
 
+    // Resolve primary face mesh for AU/viseme morphs
+    const defaultFace = meshes.find(m => m.name === FACE_MESH_NAME_DEFAULT);
+    if (defaultFace) {
+      this.faceMeshName = defaultFace.name;
+      this.faceMesh = defaultFace;
+    } else {
+      // Fallback: pick first mesh that has common face morphs
+      const candidate = meshes.find((m) => {
+        const dict: any = (m as any).morphTargetDictionary;
+        return dict && typeof dict === 'object' && 'Brow_Drop_L' in dict;
+      });
+      this.faceMeshName = candidate?.name || null;
+      this.faceMesh = candidate || null;
+    }
+
     if (scene) this.scene = scene;
     if (renderer) this.renderer = renderer;
     if (skyboxTexture) this.skyboxTexture = skyboxTexture;
-    if (composer) this.composer = composer;
 
     if (model) {
       this.model = model;
@@ -673,18 +543,6 @@ export class EngineThree {
       this.rigReady = true;
       this.missingBoneWarnings.clear();
       this.setupMeshRenderOrder(model);
-
-      // Defer hair registry to next frame
-      this.registeredHairObjects.clear();
-      requestAnimationFrame(() => {
-        if (!this.model) return;
-        this.model.traverse((obj) => {
-          const info = CC4_MESHES[obj.name];
-          if (info?.category === 'hair' || info?.category === 'eyebrow') {
-            this.registeredHairObjects.set(obj.name, obj);
-          }
-        });
-      });
     }
 
   };
@@ -692,13 +550,22 @@ export class EngineThree {
   /** Morphs **/
   setMorph = (key: string, v: number) => {
     const val = clamp01(v);
-    const isEyeOcclusionMorph = key.startsWith('EO ');
+    // All AU / face / viseme morphs live on the primary face mesh.
+    // Eye-occlusion and hair morphs are NOT handled here for now.
+    if (this.faceMesh) {
+      const dict: any = (this.faceMesh as any).morphTargetDictionary;
+      const infl: any = (this.faceMesh as any).morphTargetInfluences;
+      if (dict && infl) {
+        const idx = dict[key];
+        if (idx !== undefined) {
+          infl[idx] = val;
+          return;
+        }
+      }
+    }
+
+    // Fallback: scan all meshes (non-face or unknown morphs)
     for (const m of this.meshes) {
-      const name = (m.name || '').toLowerCase();
-      // Skip occlusion/tearline meshes UNLESS this is an eye occlusion morph
-      if (!isEyeOcclusionMorph && (name.includes('occlusion') || name.includes('tearline'))) continue;
-      // For eye occlusion morphs, only include occlusion meshes
-      if (isEyeOcclusionMorph && !name.includes('occlusion')) continue;
       const dict: any = (m as any).morphTargetDictionary;
       const infl: any = (m as any).morphTargetInfluences;
       if (!dict || !infl) continue;
@@ -712,52 +579,10 @@ export class EngineThree {
    * This avoids iterating over the entire scene for hair-only updates.
    */
   setMorphOnMeshes = (meshNames: string[], key: string, v: number) => {
-    if (!meshNames || meshNames.length === 0) {
-      this.setMorph(key, v);
-      return;
-    }
-
-    const val = clamp01(v);
-    const nameSet = new Set(meshNames.map((n) => (n || '').toLowerCase()));
-
-    for (const m of this.meshes) {
-      const name = (m.name || '').toLowerCase();
-      if (!nameSet.has(name)) continue;
-      const dict: any = (m as any).morphTargetDictionary;
-      const infl: any = (m as any).morphTargetInfluences;
-      if (!dict || !infl) continue;
-      const idx = dict[key];
-      if (idx !== undefined) infl[idx] = val;
-    }
+    // Hair / per-mesh morphs are disabled for now – no-op.
+    return;
   };
-
-  applyMorphs = (keys: string[], v: number) => {
-    const val = clamp01(v);
-    const foundMorphs: string[] = [];
-    const notFoundMorphs: string[] = [];
-
-    for (const k of keys) {
-      const isEyeOcclusionMorph = k.startsWith('EO ');
-      for (const m of this.meshes) {
-        const name = (m.name || '').toLowerCase();
-        // Skip occlusion/tearline meshes UNLESS this is an eye occlusion morph
-        if (!isEyeOcclusionMorph && (name.includes('occlusion') || name.includes('tearline'))) continue;
-        // For eye occlusion morphs, only include occlusion meshes
-        if (isEyeOcclusionMorph && !name.includes('occlusion')) continue;
-        const dict: any = (m as any).morphTargetDictionary;
-        const infl: any = (m as any).morphTargetInfluences;
-        if (!dict || !infl) continue;
-        const idx = dict[k];
-        if (idx !== undefined) {
-          infl[idx] = val;
-          if (!foundMorphs.includes(k)) foundMorphs.push(k);
-        } else {
-          if (!notFoundMorphs.includes(k)) notFoundMorphs.push(k);
-        }
-      }
-    }
-
-  };
+  
 
   /**
    * Set an AU value immediately (no transition).
@@ -891,7 +716,7 @@ export class EngineThree {
    * Combines pitch/yaw/roll from rotation state into a single quaternion.
    * All values and maxDegrees are already stored in rotations state.
    */
-  private applyCompositeRotation(nodeKey: 'JAW' | 'HEAD' | 'EYE_L' | 'EYE_R' | 'TONGUE') {
+  private applyCompositeRotation(nodeKey: BoneKey) {
     const entry = this.bones[nodeKey];
     if (!entry || !this.model) {
       if (!entry && this.rigReady && !this.missingBoneWarnings.has(nodeKey)) {
@@ -935,7 +760,7 @@ export class EngineThree {
     this.model.updateMatrixWorld(true);
   }
 
-  /** Resolve CC4 bones using explicit node names (no heuristics). */
+  /** Resolve CC4 bones using explicit node names from shapeDict. */
   private resolveBones = (root: THREE.Object3D): ResolvedBones => {
     const resolved: ResolvedBones = {};
 
@@ -946,26 +771,12 @@ export class EngineThree {
       baseEuler: new THREE.Euler().setFromQuaternion(obj.quaternion.clone(), obj.rotation.order),
     });
 
-    // Build name→object map in a single traverse (instead of multiple getObjectByName calls)
-    const boneNames = new Set([
-      CC4_BONE_NODES.EYE_L, CC4_BONE_NODES.EYE_R, CC4_BONE_NODES.JAW,
-      CC4_BONE_NODES.HEAD, CC4_BONE_NODES.NECK, CC4_BONE_NODES.TONGUE,
-      CC4_BONE_NODES.NECK_TWIST, CC4_EYE_MESH_NODES.LEFT, CC4_EYE_MESH_NODES.RIGHT
-    ].filter(Boolean) as string[]);
-
-    const nodeMap = new Map<string, THREE.Object3D>();
-    root.traverse((obj) => {
-      if (obj.name && boneNames.has(obj.name)) {
-        nodeMap.set(obj.name, obj);
-      }
-    });
-
     const findNode = (name?: string | null): THREE.Object3D | null => {
       if (!name) return null;
-      return nodeMap.get(name) || null;
+      return root.getObjectByName(name) || null;
     };
 
-    const register = (key: BoneKeys, primary?: string | null, fallback?: string | null) => {
+    const register = (key: BoneKey, primary?: string | null, fallback?: string | null) => {
       if (resolved[key]) return;
       const node = findNode(primary) || findNode(fallback || undefined);
       if (node) resolved[key] = snapshot(node);
@@ -1031,368 +842,7 @@ export class EngineThree {
     });
   }
 
-  /**
-   * Apply color to a hair or eyebrow mesh
-   */
-  setHairColor(mesh: THREE.Mesh, baseColor: string, emissive: string, emissiveIntensity: number, isEyebrow: boolean = false) {
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-
-    materials.forEach((mat) => {
-      const standardMat = mat as THREE.MeshStandardMaterial;
-
-      // Set base color
-      if (standardMat.color !== undefined) {
-        standardMat.color.set(baseColor);
-      }
-
-      // Set emissive glow
-      if (standardMat.emissive !== undefined) {
-        standardMat.emissive.set(emissive);
-        standardMat.emissiveIntensity = emissiveIntensity;
-      }
-    });
-
-    // Set renderOrder: eyebrows=5, hair=10 (consistent with setupMeshRenderOrder)
-    mesh.renderOrder = isEyebrow ? 5 : 10;
-  }
-
-  /**
-   * Create or remove wireframe outline for a mesh
-   */
-  setHairOutline(mesh: THREE.Mesh, show: boolean, color: string, opacity: number): THREE.LineSegments | undefined {
-    // Remove existing wireframe if present
-    const existingWireframe = mesh.children.find(
-      (child) => child.name === `${mesh.name}_wireframe`
-    ) as THREE.LineSegments | undefined;
-
-    if (existingWireframe) {
-      mesh.remove(existingWireframe);
-      existingWireframe.geometry.dispose();
-      (existingWireframe.material as THREE.Material).dispose();
-    }
-
-    // Add wireframe if requested
-    if (show) {
-      const wireframeGeometry = new THREE.WireframeGeometry(mesh.geometry);
-      const wireframeMaterial = new THREE.LineBasicMaterial({
-        color: new THREE.Color(color),
-        linewidth: 2,
-        transparent: true,
-        opacity: opacity,
-      });
-      const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
-      wireframe.name = `${mesh.name}_wireframe`;
-      mesh.add(wireframe);
-      return wireframe;
-    }
-
-    return undefined;
-  }
-
-
-  /**
-   * Get registered hair objects (populated in onReady from CC4_MESHES)
-   */
-  getRegisteredHairObjects(): THREE.Object3D[] {
-    return Array.from(this.registeredHairObjects.values());
-  }
-
-  /**
-   * Register hair objects and return engine-agnostic metadata.
-   * Classification is handled by shapeDict (single source of truth).
-   * Also stores direct references to avoid model lookup race conditions.
-   */
-  registerHairObjects(objects: THREE.Object3D[]): Array<{
-    name: string;
-    isEyebrow: boolean;
-    isMesh: boolean;
-  }> {
-    // Store direct references for immediate access (before onReady sets this.model)
-    this.registeredHairObjects.clear();
-    this.cachedHairMeshNames = null; // Invalidate cache
-    objects.forEach(obj => {
-      this.registeredHairObjects.set(obj.name, obj);
-    });
-
-    return objects.map((obj) => {
-      const isMesh = (obj as THREE.Mesh).isMesh || false;
-      const info = CC4_MESHES[obj.name];
-      const isEyebrow = info?.category === 'eyebrow';
-
-      if (isMesh) {
-        const mesh = obj as THREE.Mesh;
-        // Eyebrows=5, hair=10 (consistent with setupMeshRenderOrder)
-        mesh.renderOrder = isEyebrow ? 5 : 10;
-      }
-
-      return {
-        name: obj.name,
-        isEyebrow,
-        isMesh,
-      };
-    });
-  }
-
-  /**
-   * Apply hair state to scene objects by name
-   * This method handles all Three.js-specific operations for applying hair state
-   * NOTE: Handles objects with _1, _2, etc suffixes (e.g. Side_part_wavy_1, Side_part_wavy_2)
-   */
-  applyHairStateToObject(
-    objectName: string,
-    state: {
-      color: { baseColor: string; emissive: string; emissiveIntensity: number };
-      outline: { show: boolean; color: string; opacity: number };
-      visible?: boolean;
-      scale?: number;
-      position?: [number, number, number];
-      isEyebrow?: boolean;
-    }
-  ): THREE.LineSegments | undefined {
-    // Use registered hair objects (built in onReady from CC4_MESHES)
-    const registeredObj = this.registeredHairObjects.get(objectName);
-    if (!registeredObj) {
-      // Not a registered hair object - skip silently (may be called before onReady)
-      return undefined;
-    }
-
-    const matchingObjects = [registeredObj];
-
-    let lastOutline: THREE.LineSegments | undefined;
-
-    // Apply state to all matching objects
-    matchingObjects.forEach((object) => {
-      // Apply visibility
-      if (state.visible !== undefined) {
-        object.visible = state.visible;
-      }
-
-      // Apply scale
-      if (state.scale !== undefined) {
-        object.scale.setScalar(state.scale);
-      }
-
-      // Apply position
-      if (state.position) {
-        const [x, y, z] = state.position;
-        object.position.set(x, y, z);
-      }
-
-      // Apply color if it's a mesh
-      if ((object as THREE.Mesh).isMesh) {
-        const mesh = object as THREE.Mesh;
-        this.setHairColor(
-          mesh,
-          state.color.baseColor,
-          state.color.emissive,
-          state.color.emissiveIntensity,
-          state.isEyebrow || false
-        );
-
-        // Apply outline
-        lastOutline = this.setHairOutline(
-          mesh,
-          state.outline.show,
-          state.outline.color,
-          state.outline.opacity
-        );
-      }
-    });
-
-    return lastOutline;
-  }
-
-  /**
-   * Get available hair morph targets from a hair object
-   * Returns array of morph target names
-   */
-  getHairMorphTargets(objectName: string): string[] {
-    const object = this.model?.getObjectByName(objectName);
-    if (!object || !(object as THREE.Mesh).isMesh) return [];
-
-    const mesh = object as THREE.Mesh;
-    const dict = (mesh as any).morphTargetDictionary;
-    if (!dict) return [];
-
-    return Object.keys(dict);
-  }
-
-  // ========================================
-  // Hair Physics System
-  // ========================================
-
-  /** Enable or disable hair physics simulation */
-  setHairPhysicsEnabled(enabled: boolean) {
-    this.hairPhysicsEnabled = enabled;
-    if (!enabled) {
-      // Reset hair morphs to neutral via transitions
-      const duration = 200;
-      this.transitionHairMorph('L_Hair_Left', 0, duration);
-      this.transitionHairMorph('L_Hair_Right', 0, duration);
-      this.transitionHairMorph('L_Hair_Front', 0, duration);
-      this.transitionHairMorph('Fluffy_Right', 0, duration);
-      this.transitionHairMorph('Fluffy_Bottom_ALL', 0, duration);
-    }
-  }
-
-  /** Update hair physics configuration */
-  setHairPhysicsConfig(config: Partial<typeof this.hairPhysicsConfig>) {
-    this.hairPhysicsConfig = { ...this.hairPhysicsConfig, ...config };
-  }
-
-  /** Get current hair physics config (for UI) */
-  getHairPhysicsConfig() {
-    return { ...this.hairPhysicsConfig };
-  }
-
-  /**
-   * Lightweight per-frame update for wind and idle sway.
-   * Only runs when wind or idle is enabled. Much cheaper than full physics.
-   */
-  private updateHairWindIdle(dt: number) {
-    if (!this.hairPhysicsEnabled) return;
-    if (this.registeredHairObjects.size === 0) return;
-
-    const cfg = this.hairPhysicsConfig;
-    const st = this.hairWindIdleState;
-
-    // Skip if neither wind nor idle is active
-    const hasWind = cfg.windStrength > 0;
-    const hasIdle = cfg.idleSwayAmount > 0;
-    if (!hasWind && !hasIdle) return;
-
-    // Update time-based state
-    st.idlePhase += dt * cfg.idleSwaySpeed;
-    st.windTime += dt;
-
-    // Calculate wind contribution
-    let windOffset = 0;
-    if (hasWind) {
-      const primaryWave = Math.sin(st.windTime * cfg.windFrequency);
-      const secondaryWave = Math.sin(st.windTime * cfg.windFrequency * 1.7) * 0.3;
-      const waveStrength = primaryWave + secondaryWave;
-
-      const targetWind = cfg.windDirectionX * waveStrength * cfg.windStrength * 0.1;
-      const smoothFactor = 1 - Math.exp(-dt * 8);
-      st.smoothedWindX += (targetWind - st.smoothedWindX) * smoothFactor;
-      windOffset = st.smoothedWindX;
-    }
-
-    // Calculate idle sway contribution
-    let idleOffset = 0;
-    if (hasIdle) {
-      idleOffset = Math.sin(st.idlePhase * Math.PI * 2) * cfg.idleSwayAmount;
-    }
-
-    // Combined horizontal offset for left/right morphs
-    const horizontal = windOffset + idleOffset;
-
-    // Calculate all morph values (same as updateHairForHeadChange)
-    const leftValue = clamp01(horizontal > 0 ? horizontal : 0);
-    const rightValue = clamp01(horizontal < 0 ? -horizontal : 0);
-    const fluffyRightValue = clamp01(rightValue * 0.7);
-    const movementIntensity = Math.abs(horizontal);
-    const fluffyBottomValue = clamp01(movementIntensity * 0.25);
-
-    // Only update if there's meaningful change
-    if (Math.abs(horizontal) > 0.001) {
-      const duration = 50; // Short for responsive feel
-      this.transitionHairMorph('L_Hair_Left', leftValue, duration);
-      this.transitionHairMorph('L_Hair_Right', rightValue, duration);
-      this.transitionHairMorph('Fluffy_Right', fluffyRightValue, duration);
-      this.transitionHairMorph('Fluffy_Bottom_ALL', fluffyBottomValue, duration);
-      // Note: L_Hair_Front is driven by head pitch, not wind/idle
-    }
-  }
-
-  /**
-   * Event-driven hair update - called when HEAD rotation changes.
-   * Calculates target morph values and schedules transitions.
-   * No per-frame simulation - uses transition system for smooth interpolation.
-   */
-  private updateHairForHeadChange() {
-    if (this.registeredHairObjects.size === 0) return;
-
-    const cfg = this.hairPhysicsConfig;
-    const headYaw = this.rotations.HEAD?.yaw?.value ?? 0;
-    const headPitch = this.rotations.HEAD?.pitch?.value ?? 0;
-
-    // Calculate hair offset based on head position
-    // Hair swings opposite to head rotation (inertia effect)
-    const horizontal = -headYaw * cfg.inertia * cfg.responseScale;
-    const vertical = headPitch * cfg.gravity * 0.1 * cfg.responseScale;
-
-    // Map to morph targets
-    const leftValue = clamp01(horizontal > 0 ? horizontal : 0);
-    const rightValue = clamp01(horizontal < 0 ? -horizontal : 0);
-    const frontValue = clamp01(vertical * 0.5);
-    const fluffyRightValue = clamp01(rightValue * 0.7);
-    const movementIntensity = Math.abs(horizontal) + Math.abs(vertical);
-    const fluffyBottomValue = clamp01(movementIntensity * 0.25);
-
-    // Schedule transitions for each hair morph (spring-like easing via transition duration)
-    const duration = 150; // ms - short for responsive feel
-    this.transitionHairMorph('L_Hair_Left', leftValue, duration);
-    this.transitionHairMorph('L_Hair_Right', rightValue, duration);
-    this.transitionHairMorph('L_Hair_Front', frontValue, duration);
-    this.transitionHairMorph('Fluffy_Right', fluffyRightValue, duration);
-    this.transitionHairMorph('Fluffy_Bottom_ALL', fluffyBottomValue, duration);
-  }
-
-  /**
-   * Transition a hair morph target to a value.
-   * Only applies to registered hair meshes (not eyebrows).
-   */
-  private transitionHairMorph(morphKey: string, to: number, durationMs: number) {
-    const transitionKey = `hair_${morphKey}`;
-    const from = this.getHairMorphValue(morphKey);
-
-    // Get hair mesh names (cached)
-    const hairMeshNames = this.getHairMeshNames();
-    if (hairMeshNames.length === 0) return;
-
-    this.addTransition(
-      transitionKey,
-      from,
-      to,
-      durationMs,
-      (value) => this.setMorphOnMeshes(hairMeshNames, morphKey, value)
-    );
-  }
-
-  /** Get current value of a hair morph (from first hair mesh) */
-  private getHairMorphValue(morphKey: string): number {
-    const hairMeshNames = this.getHairMeshNames();
-    if (hairMeshNames.length === 0) return 0;
-
-    const meshName = hairMeshNames[0];
-    const obj = this.registeredHairObjects.get(meshName);
-    if (!obj || !(obj as THREE.Mesh).isMesh) return 0;
-
-    const mesh = obj as THREE.Mesh;
-    const dict = mesh.morphTargetDictionary;
-    const influences = mesh.morphTargetInfluences;
-    if (!dict || !influences) return 0;
-
-    const index = dict[morphKey];
-    return index !== undefined ? influences[index] : 0;
-  }
-
-  /** Get cached list of hair mesh names (excludes eyebrows) */
-  private cachedHairMeshNames: string[] | null = null;
-  private getHairMeshNames(): string[] {
-    if (this.cachedHairMeshNames) return this.cachedHairMeshNames;
-
-    const names: string[] = [];
-    this.registeredHairObjects.forEach((_, name) => {
-      const info = CC4_MESHES[name];
-      if (info?.category === 'hair') {
-        names.push(name);
-      }
-    });
-    this.cachedHairMeshNames = names;
-    return names;
-  }
+  // Hair system removed for now.
 
   /**
    * Get current head rotation values for hair physics
@@ -1409,6 +859,59 @@ export class EngineThree {
   // ========================================
   // End Hair & Eyebrow Control
   // ========================================
+
+  /**
+   * Debug helper: log all meshes that have morph targets,
+   * along with their morphTargetDictionary keys and current influences.
+   *
+   * Call from devtools via `engine.logShapeKeys()` after the model is ready.
+   */
+  logShapeKeys() {
+    console.log('[EngineThree.logShapeKeys] --- BEGIN ---');
+    const seen = new Set<THREE.Mesh>();
+
+    const processMesh = (mesh: THREE.Mesh, fallbackIndex: number) => {
+      const dict = (mesh as any).morphTargetDictionary;
+      const infl = (mesh as any).morphTargetInfluences;
+      if (!dict || !infl) return;
+
+      const meshName = mesh.name || `(unnamed_${fallbackIndex})`;
+      console.log(`\n[Mesh] ${meshName}`);
+      console.log('  morphTargetDictionary keys:', Object.keys(dict));
+
+      const byName: Record<string, number> = {};
+      for (const [name, idx] of Object.entries(dict as Record<string, number>)) {
+        byName[name] = infl[idx] ?? 0;
+      }
+      console.log('  current influences:', byName);
+    };
+
+    // Prefer traversing the full model so we don't miss any morph meshes,
+    // even if this.meshes was not populated as expected.
+    if (this.model) {
+      let i = 0;
+      this.model.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        seen.add(mesh);
+        processMesh(mesh, i++);
+      });
+    } else {
+      console.warn('[EngineThree.logShapeKeys] No model loaded yet (this.model is null).');
+    }
+
+    // Also include any meshes tracked in this.meshes that weren't reached via model traversal
+    if (this.meshes && this.meshes.length) {
+      this.meshes.forEach((mesh, idx) => {
+        if (seen.has(mesh)) return;
+        processMesh(mesh, idx);
+      });
+    } else {
+      console.warn('[EngineThree.logShapeKeys] this.meshes is empty.');
+    }
+
+    console.log('[EngineThree.logShapeKeys] --- END ---');
+  }
 
   private logResolvedOnce = (_bones: ResolvedBones) => {
     // Debug logging disabled for performance
@@ -1448,219 +951,9 @@ export class EngineThree {
     this.skyboxTexture = texture;
   };
 
-  // ============================================================================
-  // POST-PROCESSING CONTROL METHODS
-  // ============================================================================
-
-  /** Set tone mapping type */
-  setToneMapping = (type: THREE.ToneMapping) => {
-    if (this.renderer) {
-      this.renderer.toneMapping = type;
-    }
-  };
-
-  /** Get current tone mapping type */
-  getToneMapping = (): THREE.ToneMapping => {
-    return this.renderer?.toneMapping ?? THREE.NoToneMapping;
-  };
-
-  /** Set tone mapping exposure (0.1-3) */
-  setExposure = (exposure: number) => {
-    if (this.renderer) {
-      this.renderer.toneMappingExposure = Math.max(0.1, Math.min(3, exposure));
-    }
-  };
-
-  /** Get current exposure */
-  getExposure = (): number => {
-    return this.renderer?.toneMappingExposure ?? 1;
-  };
-
-  /** Set environment intensity for materials (0-3) */
-  setEnvironmentIntensity = (intensity: number) => {
-    if (this.scene) {
-      (this.scene as any).environmentIntensity = Math.max(0, Math.min(3, intensity));
-    }
-  };
-
-  /** Get current environment intensity */
-  getEnvironmentIntensity = (): number => {
-    return (this.scene as any)?.environmentIntensity ?? 1;
-  };
-
-  /** Check if renderer is ready for post-processing controls */
+  /** Check if renderer is ready for skybox/tone mapping controls */
   isRendererReady = (): boolean => {
     return this.renderer !== null;
-  };
-
-  // ============================================================================
-  // POST-PROCESSING EFFECTS
-  // ============================================================================
-
-  /** Get current post-processing effect */
-  getPostEffect = (): PostEffect => {
-    return this.currentEffect;
-  };
-
-  /** Set post-processing effect */
-  setPostEffect = (effect: PostEffect) => {
-    if (!this.composer || !this.renderer) {
-      console.warn('[EngineThree] Cannot set post effect - composer or renderer not ready');
-      return;
-    }
-
-    // Remove current effect pass if exists
-    if (this.effectPass) {
-      this.composer.removePass(this.effectPass);
-      this.effectPass = null;
-    }
-
-    this.currentEffect = effect;
-
-    if (effect === 'none') {
-      return;
-    }
-
-    const width = this.renderer.domElement.width;
-    const height = this.renderer.domElement.height;
-    const p = this.effectParams;
-
-    // Create the appropriate pass based on effect type
-    switch (effect) {
-      case 'bloom': {
-        const bloomPass = new UnrealBloomPass(
-          new THREE.Vector2(width, height),
-          p.bloom.strength,
-          p.bloom.radius,
-          p.bloom.threshold
-        );
-        this.effectPass = bloomPass;
-        break;
-      }
-      case 'film': {
-        const filmPass = new FilmPass(p.film.intensity);
-        this.effectPass = filmPass;
-        break;
-      }
-      case 'glitch': {
-        const glitchPass = new GlitchPass();
-        glitchPass.goWild = p.glitch.wild;
-        this.effectPass = glitchPass;
-        break;
-      }
-      case 'halftone': {
-        const halftonePass = new HalftonePass(width, height, {
-          shape: 1,
-          radius: p.halftone.radius,
-          rotateR: Math.PI / 12,
-          rotateB: Math.PI / 12 * 2,
-          rotateG: Math.PI / 12 * 3,
-          scatter: p.halftone.scatter,
-          blending: 1,
-          blendingMode: 1,
-          greyscale: p.halftone.greyscale,
-        });
-        this.effectPass = halftonePass;
-        break;
-      }
-      case 'dotScreen': {
-        const dotScreenPass = new DotScreenPass(
-          new THREE.Vector2(0, 0),
-          p.dotScreen.angle,
-          p.dotScreen.scale
-        );
-        this.effectPass = dotScreenPass;
-        break;
-      }
-      case 'vignette': {
-        const vignettePass = new ShaderPass(VignetteShader);
-        vignettePass.uniforms['offset'].value = p.vignette.offset;
-        vignettePass.uniforms['darkness'].value = p.vignette.darkness;
-        this.effectPass = vignettePass;
-        break;
-      }
-      case 'sepia': {
-        const sepiaPass = new ShaderPass(SepiaShader);
-        sepiaPass.uniforms['amount'].value = p.sepia.amount;
-        this.effectPass = sepiaPass;
-        break;
-      }
-    }
-
-    if (this.effectPass) {
-      this.composer.addPass(this.effectPass);
-    }
-  };
-
-  /** Get effect parameters for a specific effect */
-  getEffectParams = <T extends keyof EffectParams>(effect: T): EffectParams[T] => {
-    return { ...this.effectParams[effect] };
-  };
-
-  /** Set effect parameters and update the effect if it's currently active */
-  setEffectParams = <T extends keyof EffectParams>(effect: T, params: Partial<EffectParams[T]>) => {
-    this.effectParams[effect] = { ...this.effectParams[effect], ...params } as EffectParams[T];
-
-    // If this effect is currently active, update the pass directly
-    if (this.currentEffect === effect && this.effectPass) {
-      this.updateEffectPass(effect);
-    }
-  };
-
-  /** Update the current effect pass with stored parameters */
-  private updateEffectPass = (effect: keyof EffectParams) => {
-    if (!this.effectPass) return;
-
-    const p = this.effectParams;
-
-    switch (effect) {
-      case 'bloom': {
-        const pass = this.effectPass as UnrealBloomPass;
-        pass.strength = p.bloom.strength;
-        pass.radius = p.bloom.radius;
-        pass.threshold = p.bloom.threshold;
-        break;
-      }
-      case 'film': {
-        const pass = this.effectPass as FilmPass;
-        (pass as any).uniforms.intensity.value = p.film.intensity;
-        break;
-      }
-      case 'glitch': {
-        const pass = this.effectPass as GlitchPass;
-        pass.goWild = p.glitch.wild;
-        break;
-      }
-      case 'halftone': {
-        const pass = this.effectPass as HalftonePass;
-        (pass as any).uniforms.radius.value = p.halftone.radius;
-        (pass as any).uniforms.scatter.value = p.halftone.scatter;
-        (pass as any).uniforms.greyscale.value = p.halftone.greyscale ? 1 : 0;
-        break;
-      }
-      case 'dotScreen': {
-        const pass = this.effectPass as DotScreenPass;
-        (pass as any).uniforms.scale.value = p.dotScreen.scale;
-        (pass as any).uniforms.angle.value = p.dotScreen.angle;
-        break;
-      }
-      case 'vignette': {
-        const pass = this.effectPass as ShaderPass;
-        pass.uniforms['offset'].value = p.vignette.offset;
-        pass.uniforms['darkness'].value = p.vignette.darkness;
-        break;
-      }
-      case 'sepia': {
-        const pass = this.effectPass as ShaderPass;
-        pass.uniforms['amount'].value = p.sepia.amount;
-        break;
-      }
-    }
-  };
-
-  /** Check if composer is ready for effects */
-  isComposerReady = (): boolean => {
-    return this.composer !== null;
   };
 }
 
