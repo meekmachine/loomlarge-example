@@ -7,7 +7,7 @@ import {
   CC4_EYE_MESH_NODES,
   CC4_MESHES,
   VISEME_KEYS,
-  MIXED_AUS,
+  isMixedAU,
   MORPH_TO_MESH,
   AU_INFO,
 } from './arkit/shapeDict';
@@ -27,15 +27,14 @@ import { ThreeAnimation } from './ThreeAnimation';
 /** All AU IDs that have bone bindings */
 export const BONE_DRIVEN_AUS = new Set(Object.keys(BONE_AU_TO_BINDINGS).map(Number));
 
-/** All bones that participate in composite rotations (derived from bindings) */
-const COMPOSITE_BONE_KEYS: BoneKey[] = Array.from(
+/** All bone keys used in AU bindings (derived from BONE_AU_TO_BINDINGS) */
+const ALL_BONE_KEYS = Array.from(
   new Set(
     Object.values(BONE_AU_TO_BINDINGS)
       .flat()
-      .filter(binding => binding.channel === 'rx' || binding.channel === 'ry' || binding.channel === 'rz')
-      .map(binding => binding.node as BoneKey)
+      .map(binding => binding.node)
   )
-);
+) as BoneKey[];
 
 const X_AXIS = new THREE.Vector3(1,0,0);
 const Y_AXIS = new THREE.Vector3(0,1,0);
@@ -80,7 +79,12 @@ export class EngineThree {
   private rafId: number | null = null;
   private running = false;
 
-  // Fast lookup table for meshes by name (avoids scanning this.meshes every time)
+  // Morph index cache: morphKey → array of { influences array, index }
+  // Stores multiple targets since a morph like browInnerUp exists in face + eyebrow meshes
+  private morphCache = new Map<string, { infl: number[], idx: number }[]>();
+
+  // Mesh lookup by name - populated from MORPH_TO_MESH mesh names
+  // Used by setMorph to quickly find the right mesh for each morph category
   private meshByName = new Map<string, THREE.Mesh>();
 
 
@@ -143,21 +147,7 @@ export class EngineThree {
       return 0;
     }
 
-    // Non-face categories or rare cases where faceMesh isn't resolved yet:
-    // use the first named mesh if provided.
-    if (meshNames && meshNames.length) {
-      const mesh = this.meshByName.get(meshNames[0]);
-      if (mesh) {
-        const dict: any = (mesh as any).morphTargetDictionary;
-        const infl: any = (mesh as any).morphTargetInfluences;
-        if (dict && infl) {
-          const idx = dict[key];
-          if (idx !== undefined) return infl[idx] ?? 0;
-        }
-      }
-    }
-
-    // Fallback: scan all meshes (for unknown morphs or categories)
+    // Scan all meshes for the morph key
     for (const mesh of this.meshes) {
       const dict: any = (mesh as any).morphTargetDictionary;
       const infl: any = (mesh as any).morphTargetInfluences;
@@ -226,7 +216,7 @@ export class EngineThree {
     const bindings = BONE_AU_TO_BINDINGS[numId] || [];
 
     // Mix weight applies only to morph overlay (not bones)
-    const mixWeight = MIXED_AUS.has(numId) ? this.getAUMixWeight(numId) : 1.0;
+    const mixWeight = isMixedAU(numId) ? this.getAUMixWeight(numId) : 1.0;
     const base = target * mixWeight;
 
     // Calculate per-side values using shared helper
@@ -593,7 +583,7 @@ export class EngineThree {
     this.rotations = {};
     this.pendingCompositeNodes.clear();
 
-    for (const node of COMPOSITE_BONE_KEYS) {
+    for (const node of ALL_BONE_KEYS) {
       this.rotations[node] = {
         pitch: { ...zeroAxis },
         yaw: { ...zeroAxis },
@@ -668,6 +658,7 @@ export class EngineThree {
   }) => {
     this.meshes = meshes;
     this.meshByName.clear();
+    this.morphCache.clear(); // Invalidate morph index cache when model changes
     for (const m of meshes) {
       if (m && m.name) {
         this.meshByName.set(m.name, m);
@@ -708,7 +699,21 @@ export class EngineThree {
   /** Morphs **/
   setMorph = (key: string, v: number, meshNames: string[] = MORPH_TO_MESH.face) => {
     const val = clamp01(v);
-    // First pass: only meshes in the provided list (e.g., face + brows)
+
+    // Fast path: check cache first (may have multiple entries for same morph key)
+    const cached = this.morphCache.get(key);
+    if (cached) {
+      // Apply to all cached targets
+      for (const target of cached) {
+        target.infl[target.idx] = val;
+      }
+      return;
+    }
+
+    // Cache miss: look up in all specified meshes and cache for next time
+    // A morph like browInnerUp exists in both face mesh AND eyebrow meshes
+    const targets: { infl: number[], idx: number }[] = [];
+
     if (meshNames && meshNames.length) {
       for (const name of meshNames) {
         const mesh = this.meshByName.get(name);
@@ -718,21 +723,27 @@ export class EngineThree {
         if (!dict || !infl) continue;
         const idx = dict[key];
         if (idx !== undefined) {
+          targets.push({ infl, idx });
           infl[idx] = val;
         }
       }
-      return;
+    } else {
+      // Fallback: scan all known meshes (for unknown morphs or categories)
+      for (const mesh of this.meshes) {
+        const dict: any = (mesh as any).morphTargetDictionary;
+        const infl: any = (mesh as any).morphTargetInfluences;
+        if (!dict || !infl) continue;
+        const idx = dict[key];
+        if (idx !== undefined) {
+          targets.push({ infl, idx });
+          infl[idx] = val;
+        }
+      }
     }
 
-    // Fallback: scan all known meshes (for unknown morphs or categories)
-    for (const mesh of this.meshes) {
-      const dict: any = (mesh as any).morphTargetDictionary;
-      const infl: any = (mesh as any).morphTargetInfluences;
-      if (!dict || !infl) continue;
-      const idx = dict[key];
-      if (idx !== undefined) {
-        infl[idx] = val;
-      }
+    // Cache all targets found for this morph key
+    if (targets.length > 0) {
+      this.morphCache.set(key, targets);
     }
   };
   
@@ -768,7 +779,7 @@ export class EngineThree {
     const keys = AU_TO_MORPHS[id] || [];
     if (keys.length) {
       // Mix weight scales only the morph overlay – bones stay at full strength
-      const mixWeight = MIXED_AUS.has(id) ? this.getAUMixWeight(id) : 1.0;
+      const mixWeight = isMixedAU(id) ? this.getAUMixWeight(id) : 1.0;
       const base = clamp01(v) * mixWeight;
 
       // Get correct mesh names for this AU (tongue AUs go to tongue mesh, face AUs to face mesh)
@@ -918,21 +929,21 @@ export class EngineThree {
       return root.getObjectByName(name) || null;
     };
 
-    const register = (key: BoneKey, primary?: string | null, fallback?: string | null) => {
-      if (resolved[key]) return;
-      const node = findNode(primary) || findNode(fallback || undefined);
-      if (node) resolved[key] = snapshot(node);
-    };
+    // Register all bones from CC4_BONE_NODES
+    for (const [key, nodeName] of Object.entries(CC4_BONE_NODES)) {
+      const node = findNode(nodeName);
+      if (node) resolved[key as BoneKey] = snapshot(node);
+    }
 
-    register('EYE_L', CC4_BONE_NODES.EYE_L, CC4_EYE_MESH_NODES.LEFT);
-    register('EYE_R', CC4_BONE_NODES.EYE_R, CC4_EYE_MESH_NODES.RIGHT);
-    register('JAW', CC4_BONE_NODES.JAW);
-    register('HEAD', CC4_BONE_NODES.HEAD);
-    register('NECK', CC4_BONE_NODES.NECK);
-    register('TONGUE', CC4_BONE_NODES.TONGUE);
-
-    const neckTwist = findNode(CC4_BONE_NODES.NECK_TWIST);
-    if (neckTwist) (resolved as any).NECK2 = snapshot(neckTwist);
+    // Eye fallbacks - try mesh nodes if bone nodes not found
+    if (!resolved.EYE_L) {
+      const node = findNode(CC4_EYE_MESH_NODES.LEFT);
+      if (node) resolved.EYE_L = snapshot(node);
+    }
+    if (!resolved.EYE_R) {
+      const node = findNode(CC4_EYE_MESH_NODES.RIGHT);
+      if (node) resolved.EYE_R = snapshot(node);
+    }
 
     return resolved;
   };
@@ -1032,9 +1043,50 @@ export class EngineThree {
     console.log('[EngineThree.logShapeKeys] --- END ---');
   }
 
+  /**
+   * Debug helper: log all bone nodes and skinned meshes in the model.
+   * Call from devtools via `engine.logBones()` after the model is ready.
+   */
+  logBones() {
+    if (!this.model) {
+      console.warn('[EngineThree.logBones] No model loaded');
+      return;
+    }
+
+    console.log('[EngineThree.logBones] --- BEGIN ---');
+
+    // Find all skinned meshes and their skeletons
+    const skinnedMeshes: THREE.SkinnedMesh[] = [];
+    this.model.traverse((obj) => {
+      if ((obj as THREE.SkinnedMesh).isSkinnedMesh) {
+        skinnedMeshes.push(obj as THREE.SkinnedMesh);
+      }
+    });
+
+    console.log(`\nFound ${skinnedMeshes.length} skinned meshes:`);
+    for (const mesh of skinnedMeshes) {
+      const skeleton = mesh.skeleton;
+      console.log(`\n[SkinnedMesh] ${mesh.name}`);
+      console.log(`  Skeleton bones (${skeleton.bones.length}):`);
+      console.log('  ', skeleton.bones.map(b => b.name));
+    }
+
+    // Also list all bones in hierarchy
+    const allBones: string[] = [];
+    this.model.traverse((obj) => {
+      if ((obj as THREE.Bone).isBone) {
+        allBones.push(obj.name);
+      }
+    });
+    console.log('\nAll bone nodes in hierarchy:', allBones);
+    console.log('Total bones:', allBones.length);
+
+    console.log('[EngineThree.logBones] --- END ---');
+  }
+
   private logResolvedOnce = (_bones: ResolvedBones) => {
     // Debug logging disabled for performance
-    // Call engine.logShapeKeys() and engine.logResolvedBones() manually if needed
+    // Call engine.logShapeKeys() and engine.logBones() manually if needed
   };
 
   // ============================================================================

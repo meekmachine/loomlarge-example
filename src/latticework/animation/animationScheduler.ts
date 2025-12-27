@@ -360,6 +360,10 @@ export class AnimationScheduler {
         // Emit keyframe completed event for UI updates
         const snForDuration = getSnippet();
         const snippetDuration = snForDuration ? this.totalDuration(snForDuration) : 0;
+        // Update snippet's currentTime so getSnippet() returns the correct value
+        if (snForDuration) {
+          (snForDuration as any).currentTime = keyframeTimes[i];
+        }
         animationEventEmitter.emitKeyframeCompleted({
           snippetName,
           keyframeIndex: i,

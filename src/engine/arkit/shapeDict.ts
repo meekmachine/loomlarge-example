@@ -27,8 +27,8 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
   10: ['Nose_Sneer_L','Nose_Sneer_R'],  // Upper Lip Raiser (levator labii superioris) - raises upper lip in disgust/sneer
   11: ['Mouth_Up_Upper_L','Mouth_Up_Upper_R'],  // Nasolabial Deepener (zygomaticus minor) - no dedicated morph
   12: ['Mouth_Smile_L','Mouth_Smile_R'],
-  13: ['Mouth_Shrug_Upper'],  // Sharp Lip Puller (levator anguli oris) - no dedicated morph, using shrug as approximation
-  14: ['Mouth_Dimple_L','Mouth_Dimple_R'],
+  13: ['Mouth_Dimple_L','Mouth_Dimple_R'],  // Sharp Lip Puller (levator anguli oris) - pulls lip corners up
+  14: ['Mouth_Press_L','Mouth_Press_R'],
   15: ['Mouth_Frown_L','Mouth_Frown_R'],
   16: ['Mouth_Down_Lower_L','Mouth_Down_Lower_R'],
   17: ['Mouth_Shrug_Lower'],
@@ -41,6 +41,7 @@ export const AU_TO_MORPHS: Record<number, string[]> = {
   26: ['Jaw_Open'],  // Jaw Drop - mixed: bone rotation + Jaw_Open morph
   27: ['Jaw_Open'],  // Mouth Stretch - larger jaw open with morph
   28: ['Mouth_Roll_In_Upper','Mouth_Roll_In_Lower'],
+  32: ['Mouth_Roll_In_Lower'],  // Lip Bite - using roll in lower as approximation
 
   // Tongue
   19: ['Tongue_Out'],
@@ -168,7 +169,10 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
   71: [ { node: 'EYE_R', channel: 'rx', scale: -1, maxDegrees: 12 } ],
   72: [ { node: 'EYE_R', channel: 'rx', scale:  1, maxDegrees: 12 } ],
 
-  // Jaw
+  // Jaw / Mouth
+  8: [ // Lips Toward Each Other - slight jaw open helps sell the lip press
+    { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 8 },  // Small downward rotation (jaw opening slightly)
+  ],
   25: [ // Lips Part — small jaw open
     { node: 'JAW', channel: 'rz', scale: 1, maxDegrees: 5.84 },  // 73% of 8
   ],
@@ -212,12 +216,9 @@ export const BONE_AU_TO_BINDINGS: Record<number, BoneBinding[]> = {
   ],
 };
 
-/** AUs that have both morphs and bones - can blend between them */
-export const MIXED_AUS = new Set(
-  Object.keys(AU_TO_MORPHS)
-    .map(Number)
-    .filter(id => AU_TO_MORPHS[id]?.length && BONE_AU_TO_BINDINGS[id]?.length)
-);
+/** Check if an AU has both morphs and bones (can blend between them) */
+export const isMixedAU = (id: number): boolean =>
+  !!(AU_TO_MORPHS[id]?.length && BONE_AU_TO_BINDINGS[id]?.length);
 
 /** Check if an AU has separate left/right morphs */
 export const hasLeftRightMorphs = (auId: number): boolean => {
@@ -343,7 +344,7 @@ export const AU_INFO: Record<string, AUInfo> = {
   // Forehead / Brow (Upper)
   '1':  { id:'1',  name:'Inner Brow Raiser',  muscularBasis:'frontalis (pars medialis)', links:['https://en.wikipedia.org/wiki/Frontalis_muscle'], faceArea:'Upper', facePart:'Forehead', faceSection:'Forehead' },
   '2':  { id:'2',  name:'Outer Brow Raiser',  muscularBasis:'frontalis (pars lateralis)', links:['https://en.wikipedia.org/wiki/Frontalis_muscle'], faceArea:'Upper', facePart:'Forehead', faceSection:'Forehead' },
-  '4':  { id:'4',  name:'Brow Lowerer',      muscularBasis:'corrugator/depressor supercilii', links:['https://en.wikipedia.org/wiki/Corrugator_supercilii'], faceArea:'Upper', facePart:'Brow', faceSection:'Brow' },
+  '4':  { id:'4',  name:'Brow Lowerer',      muscularBasis:'corrugator/depressor supercilii', links:['https://en.wikipedia.org/wiki/Corrugator_supercilii'], faceArea:'Upper', facePart:'Forehead', faceSection:'Forehead' },
 
   // Eyelids / Eyes (Upper)
   '5':  { id:'5',  name:'Upper Lid Raiser',  muscularBasis:'levator palpebrae superioris', links:['https://en.wikipedia.org/wiki/Levator_palpebrae_superioris'], faceArea:'Upper', facePart:'Eyelids', faceSection:'Eyelids' },
@@ -399,6 +400,7 @@ export const AU_INFO: Record<string, AUInfo> = {
   '29': { id:'29', name:'Jaw Thrust',        faceArea:'Lower', facePart:'Jaw', faceSection:'Jaw' },
   '30': { id:'30', name:'Jaw Left',          faceArea:'Lower', facePart:'Jaw', faceSection:'Jaw' },
   '31': { id:'31', name:'Jaw Clencher',      muscularBasis:'masseter + temporalis', faceArea:'Lower', facePart:'Jaw', faceSection:'Jaw' },
+  '32': { id:'32', name:'Lip Bite',          muscularBasis:'orbicularis oris', faceArea:'Lower', facePart:'Mouth', faceSection:'Mouth' },
   '35': { id:'35', name:'Jaw Right',         faceArea:'Lower', facePart:'Jaw', faceSection:'Jaw' },
 
   // Head position (M51-M56 in FACS notation)

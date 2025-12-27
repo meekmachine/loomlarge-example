@@ -9,7 +9,7 @@ import {
   HStack
 } from '@chakra-ui/react';
 import { EngineThree } from '../../engine/EngineThree';
-import { MIXED_AUS, hasLeftRightMorphs } from '../../engine/arkit/shapeDict';
+import { isMixedAU, hasLeftRightMorphs } from '../../engine/arkit/shapeDict';
 
 interface AUSliderProps {
   au: string | number;
@@ -76,7 +76,7 @@ const AUSlider: React.FC<AUSliderProps> = ({
   // Check AU properties
   const auId = typeof au === 'number' ? au : parseInt(String(au).replace(/[^\d]/g, ''));
   const auIdStr = String(au);
-  const isMixedAU = MIXED_AUS.has(auId);
+  const hasMixedAU = isMixedAU(auId);
   const isBilateralAU = hasLeftRightMorphs(auId);
 
   // Fetch Wikipedia images for muscle info
@@ -130,7 +130,7 @@ const AUSlider: React.FC<AUSliderProps> = ({
 
   // Get current mix value from engine, or use local state
   const getMix = () => {
-    if (engine && isMixedAU) {
+    if (engine && hasMixedAU) {
       return engine.getAUMixWeight(auId) ?? mixValue;
     }
     return mixValue;
@@ -139,7 +139,7 @@ const AUSlider: React.FC<AUSliderProps> = ({
   // Update mix weight in engine and local state
   const handleMixChange = (v: number) => {
     setMixValue(v);
-    if (engine && isMixedAU) {
+    if (engine && hasMixedAU) {
       engine.setAUMixWeight(auId, v);
     }
   };
@@ -241,7 +241,7 @@ const AUSlider: React.FC<AUSliderProps> = ({
       )}
 
       {/* Morph ↔ Bone blend slider (only for mixed AUs with bone bindings) */}
-      {isMixedAU && engine && (
+      {hasMixedAU && engine && (
         <Box pt={2} borderTop="1px solid" borderColor="gray.600">
           <HStack mb={1} justify="space-between">
             <Text fontSize="xs" color="gray.300">Blend (Morph ↔ Bone)</Text>
