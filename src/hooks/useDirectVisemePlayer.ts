@@ -5,11 +5,11 @@
 
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { DirectVisemePlayer, VisemePlayerConfig, createDirectVisemePlayer } from '../utils/directVisemePlayer';
-import type { EngineThree } from '../engine/EngineThree';
+import { LoomLargeThree } from 'loomlarge';
 
 export interface UseDirectVisemePlayerOptions extends Partial<VisemePlayerConfig> {
   /** Engine instance (required) */
-  engine: EngineThree | null | undefined;
+  engine: LoomLargeThree | null | undefined;
 }
 
 export interface UseDirectVisemePlayerReturn {

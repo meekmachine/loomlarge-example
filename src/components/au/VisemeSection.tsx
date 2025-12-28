@@ -4,8 +4,7 @@ import { Plus } from 'lucide-react';
 import { toaster } from '../ui/toaster';
 import DockableAccordionItem from './DockableAccordionItem';
 import { CurveEditor } from '../CurveEditor';
-import { EngineThree } from '../../engine/EngineThree';
-import { VISEME_KEYS } from '../../engine/arkit/shapeDict';
+import { LoomLargeThree, VISEME_KEYS } from 'loomlarge';
 import type { NormalizedSnippet } from '../../latticework/animation/types';
 import { useEngineState } from '../../context/engineContext';
 
@@ -37,7 +36,7 @@ const getSliderColor = (value: number): string => {
 interface VisemeSliderProps {
   visemeKey: string;
   disabled: boolean;
-  engine?: EngineThree | null;
+  engine?: LoomLargeThree | null;
 }
 
 const VisemeSlider = memo(function VisemeSlider({
@@ -144,7 +143,7 @@ const VisemeSlider = memo(function VisemeSlider({
 });
 
 interface VisemeSectionProps {
-  engine?: EngineThree | null;
+  engine?: LoomLargeThree | null;
   disabled?: boolean;
   useCurveEditor?: boolean;
   visemeSnippetCurves?: Record<string, SnippetCurveData[]>;

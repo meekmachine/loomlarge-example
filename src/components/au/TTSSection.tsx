@@ -11,7 +11,7 @@ import {
   Badge,
 } from '@chakra-ui/react';
 import DockableAccordionItem from './DockableAccordionItem';
-import { EngineThree } from '../../engine/EngineThree';
+import { LoomLargeThree } from 'loomlarge';
 import { createTTSService } from '../../latticework/tts';
 import { createLipSyncService } from '../../latticework/lipsync';
 import type { TTSService } from '../../latticework/tts/ttsService';
@@ -19,7 +19,7 @@ import type { LipSyncServiceAPI } from '../../latticework/lipsync';
 import { useEngineState } from '../../context/engineContext';
 
 interface TTSSectionProps {
-  engine?: EngineThree | null;
+  engine?: LoomLargeThree | null;
   disabled?: boolean;
   defaultExpanded?: boolean;
 }

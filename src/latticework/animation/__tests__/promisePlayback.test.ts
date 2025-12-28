@@ -3,7 +3,7 @@ import { AnimationScheduler } from '../animationScheduler';
 import { createActor } from 'xstate';
 import { animationMachine } from '../animationMachine';
 import type { HostCaps } from '../types';
-import type { TransitionHandle } from '../../../engine/EngineThree.types';
+import type { TransitionHandle } from 'loomlarge';
 
 /**
  * Tests for the promise-based playback system.

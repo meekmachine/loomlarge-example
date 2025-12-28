@@ -28,6 +28,7 @@
     "@xstate/react": "^6.0.0",
     "face-api.js": "^0.22.2",
     "livekit-client": "^2.8.1",
+    "loomlarge": "^0.1.4",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

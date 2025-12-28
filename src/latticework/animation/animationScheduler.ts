@@ -1,6 +1,6 @@
 import type { Snippet, HostCaps, ScheduleOpts } from './types';
-import type { TransitionHandle } from '../../engine/EngineThree.types';
-import { VISEME_KEYS, COMPOSITE_ROTATIONS } from '../../engine/arkit/shapeDict';
+import type { TransitionHandle } from 'loomlarge';
+import { VISEME_KEYS, COMPOSITE_ROTATIONS } from 'loomlarge';
 import { animationEventEmitter } from './animationService';
 
 type RuntimeSched = { name: string; startsAt: number; offset: number; enabled: boolean };

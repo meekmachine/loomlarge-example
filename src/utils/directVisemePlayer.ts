@@ -5,7 +5,7 @@
  * This gives precise control over blending and timing.
  */
 
-import type { EngineThree } from '../engine/EngineThree';
+import { LoomLargeThree } from 'loomlarge';
 import { phonemeExtractor } from '../latticework/lipsync/PhonemeExtractor';
 import { visemeMapper } from '../latticework/lipsync/VisemeMapper';
 
@@ -41,13 +41,13 @@ interface VisemeEvent {
  * Plays text as viseme animations with smooth blending
  */
 export class DirectVisemePlayer {
-  private engine: EngineThree;
+  private engine: LoomLargeThree;
   private config: VisemePlayerConfig;
   private isPlaying = false;
   private shouldStop = false;
   private currentVisemeIndex = -1;
 
-  constructor(engine: EngineThree, config: Partial<VisemePlayerConfig> = {}) {
+  constructor(engine: LoomLargeThree, config: Partial<VisemePlayerConfig> = {}) {
     this.engine = engine;
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
@@ -232,7 +232,7 @@ export class DirectVisemePlayer {
  * Create a direct viseme player instance
  */
 export function createDirectVisemePlayer(
-  engine: EngineThree,
+  engine: LoomLargeThree,
   config?: Partial<VisemePlayerConfig>
 ): DirectVisemePlayer {
   return new DirectVisemePlayer(engine, config);

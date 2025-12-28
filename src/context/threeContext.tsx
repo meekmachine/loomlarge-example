@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useRef, useEffect } from 'react';
-import { EngineThree } from '../engine/EngineThree';
+import { LoomLargeThree, CC4_PRESET } from 'loomlarge';
 import { createAnimationService, type AnimationService } from '../latticework/animation/animationService';
-import type { Engine } from '../engine/EngineThree.types';
+import type { Engine } from '../latticework/animation/types';
 
 export type ThreeContextValue = {
-  engine: EngineThree;
+  engine: LoomLargeThree;
   /** Animation service for scheduling and playing animation snippets */
   anim: AnimationService;
 };
@@ -12,10 +12,10 @@ export type ThreeContextValue = {
 const ThreeCtx = createContext<ThreeContextValue | null>(null);
 
 /**
- * Create an Engine adapter that wraps EngineThree for the animation service.
- * This adapts EngineThree's methods to the Engine interface expected by AnimationService.
+ * Create an Engine adapter that wraps LoomLargeThree for the animation service.
+ * This adapts LoomLargeThree's methods to the Engine interface expected by AnimationService.
  */
-function createEngineAdapter(engine: EngineThree): Engine {
+function createEngineAdapter(engine: LoomLargeThree): Engine {
   return {
     applyAU: (id, v) => engine.setAU(id as number, v),
     setMorph: (key, v) => engine.setMorph(key, v),
@@ -35,19 +35,19 @@ function createEngineAdapter(engine: EngineThree): Engine {
 }
 
 /**
- * ThreeProvider - Provides EngineThree and animation service via React context.
+ * ThreeProvider - Provides LoomLargeThree and animation service via React context.
  *
- * EngineThree handles low-level rendering (morphs, bones, transitions).
+ * LoomLargeThree handles low-level rendering (morphs, bones, transitions).
  * AnimationService handles high-level animation scheduling and playback.
  * This provider creates both and wires them together.
  */
 export const ThreeProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
-  const engineRef = useRef<EngineThree | null>(null);
+  const engineRef = useRef<LoomLargeThree | null>(null);
   const animRef = useRef<AnimationService | null>(null);
 
   // Create engine singleton (once, outside of render cycle)
   if (!engineRef.current) {
-    engineRef.current = new EngineThree();
+    engineRef.current = new LoomLargeThree({ auMappings: CC4_PRESET });
     if (typeof window !== 'undefined') {
       (window as any).engine = engineRef.current;
     }

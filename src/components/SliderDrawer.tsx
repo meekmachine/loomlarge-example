@@ -12,7 +12,7 @@ import {
 } from '@chakra-ui/react';
 import { useSelector } from '@xstate/react';
 import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe } from 'react-icons/fa';
-import { AU_INFO, AUInfo } from '../engine/arkit/shapeDict';
+import { AU_INFO, type AUInfo } from 'loomlarge';
 import AUSection from './au/AUSection';
 import VisemeSection from './au/VisemeSection';
 import TTSSection from './au/TTSSection';
@@ -24,7 +24,7 @@ import MeshPanel from './au/MeshPanel';
 import SkyboxSection from './au/SkyboxSection';
 import { useThreeState } from '../context/threeContext';
 import type { NormalizedSnippet, CurvePoint } from '../latticework/animation/types';
-import { EngineThree } from '../engine/EngineThree';
+import { LoomLargeThree } from 'loomlarge';
 
 // Stable empty array reference - MUST be outside component to prevent re-renders
 const EMPTY_SNIPPETS: NormalizedSnippet[] = [];
@@ -233,7 +233,7 @@ const AnimationTabContent = memo(() => (
 ));
 
 // Speech Tab
-const SpeechTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) => (
+const SpeechTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => (
   <TTSSection engine={engine} disabled={disabled} defaultExpanded />
 ));
 
@@ -243,17 +243,17 @@ const BlinkTabContent = memo(({ disabled }: { disabled: boolean }) => (
 ));
 
 // Tracking Tab
-const TrackingTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) => (
+const TrackingTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => (
   <EyeHeadTrackingSection engine={engine} disabled={disabled} defaultExpanded />
 ));
 
 // Meshes Tab
-const MeshesTabContent = memo(({ engine }: { engine: EngineThree | null }) => (
+const MeshesTabContent = memo(({ engine }: { engine: LoomLargeThree | null }) => (
   <MeshPanel engine={engine} defaultExpanded />
 ));
 
 // Skybox Tab
-const SkyboxTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) => (
+const SkyboxTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => (
   <SkyboxSection engine={engine} disabled={disabled} defaultExpanded />
 ));
 
@@ -326,7 +326,7 @@ const AUControlsPanel = memo(({
 ));
 
 // AU Tab - complex, has its own state
-const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) => {
+const AUTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => {
   const { anim } = useThreeState();
 
   const [segmentationMode, setSegmentationMode] = useState<'facePart' | 'faceArea'>('facePart');
@@ -435,7 +435,7 @@ const AUTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; d
 });
 
 // Visemes Tab - has its own curve state
-const VisemesTabContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) => {
+const VisemesTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => {
   const { anim } = useThreeState();
 
   const [useCurveEditor, setUseCurveEditor] = useState(false);
@@ -494,7 +494,7 @@ const VisemesTabContent = memo(({ engine, disabled }: { engine: EngineThree | nu
 interface TabContentContainerProps {
   activeTab: TabId;
   mountedTabs: Set<TabId>;
-  engine: EngineThree | null;
+  engine: LoomLargeThree | null;
   disabled: boolean;
 }
 
@@ -515,25 +515,25 @@ const TabPanel = memo(({
 
 // Each tab content component is wrapped individually to prevent re-renders
 const MemoizedAnimationContent = memo(() => <AnimationTabContent />);
-const MemoizedSpeechContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+const MemoizedSpeechContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
   <SpeechTabContent engine={engine} disabled={disabled} />
 );
 const MemoizedBlinkContent = memo(({ disabled }: { disabled: boolean }) =>
   <BlinkTabContent disabled={disabled} />
 );
-const MemoizedAUContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+const MemoizedAUContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
   <AUTabContent engine={engine} disabled={disabled} />
 );
-const MemoizedVisemesContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+const MemoizedVisemesContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
   <VisemesTabContent engine={engine} disabled={disabled} />
 );
-const MemoizedTrackingContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+const MemoizedTrackingContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
   <TrackingTabContent engine={engine} disabled={disabled} />
 );
-const MemoizedMeshesContent = memo(({ engine }: { engine: EngineThree | null }) =>
+const MemoizedMeshesContent = memo(({ engine }: { engine: LoomLargeThree | null }) =>
   <MeshesTabContent engine={engine} />
 );
-const MemoizedSkyboxContent = memo(({ engine, disabled }: { engine: EngineThree | null; disabled: boolean }) =>
+const MemoizedSkyboxContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
   <SkyboxTabContent engine={engine} disabled={disabled} />
 );
 

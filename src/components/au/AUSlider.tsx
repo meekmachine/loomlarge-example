@@ -8,8 +8,7 @@ import {
   VStack,
   HStack
 } from '@chakra-ui/react';
-import { EngineThree } from '../../engine/EngineThree';
-import { isMixedAU, hasLeftRightMorphs } from '../../engine/arkit/shapeDict';
+import { LoomLargeThree, isMixedAU, hasLeftRightMorphs } from 'loomlarge';
 
 interface AUSliderProps {
   au: string | number;
@@ -18,7 +17,7 @@ interface AUSliderProps {
   initialBalance?: number; // Optional initial balance (-1 to +1)
   muscularBasis?: string;
   links?: string[];
-  engine?: EngineThree | null; // Optional: for morph/bone blend control
+  engine?: LoomLargeThree | null; // Optional: for morph/bone blend control
   disabled?: boolean;
   onValueChange?: (id: string, value: number) => void; // Optional callback for parent tracking
 }

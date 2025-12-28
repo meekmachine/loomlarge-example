@@ -1,9 +1,25 @@
 // Unified types for the Animation Agency (Machine + Service + Scheduler)
 
-import type { Engine, HostCaps } from '../../engine/EngineThree.types';
+import type { TransitionHandle } from 'loomlarge';
 
-// Re-export Engine types for convenience
-export type { Engine, HostCaps };
+/**
+ * Host capabilities interface - what the engine must provide to the animation service.
+ * This is the contract between AnimationService/Scheduler and the underlying engine.
+ */
+export interface HostCaps {
+  applyAU(id: number, v: number, balance?: number): void;
+  setMorph(name: string, v: number): void;
+  transitionAU?(id: number, v: number, durationMs: number, balance?: number): TransitionHandle;
+  transitionMorph?(name: string, v: number, durationMs: number): TransitionHandle;
+  setViseme?(index: number, v: number, jawScale?: number): void;
+  transitionViseme?(index: number, v: number, durationMs: number, jawScale?: number): TransitionHandle;
+  onSnippetEnd?(name: string): void;
+}
+
+/**
+ * Engine interface - alias for HostCaps for backwards compatibility.
+ */
+export type Engine = HostCaps;
 
 // ---------- Mixer blending (AnimationMixer) ----------
 export type MixerBlendMode = 'replace' | 'additive' | 'crossfade' | 'fade' | 'warp';

@@ -5,7 +5,7 @@
 
 import { PhonemeExtractor } from './PhonemeExtractor';
 import { VisemeMapper } from './VisemeMapper';
-import { VISEME_KEYS } from '../../engine/arkit/shapeDict';
+import { VISEME_KEYS } from 'loomlarge';
 
 export interface TestResult {
   passed: boolean;

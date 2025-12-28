@@ -7,14 +7,13 @@ import {
   HStack,
   VStack
 } from '@chakra-ui/react';
-import { AUInfo, AU_MIX_DEFAULTS, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS } from '../../engine/arkit/shapeDict';
-import { EngineThree } from '../../engine/EngineThree';
+import { AUInfo, AU_MIX_DEFAULTS, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS, LoomLargeThree } from 'loomlarge';
 
 interface ContinuumSliderProps {
   negativeAU: AUInfo;
   positiveAU: AUInfo;
   initialValue?: number; // -1 to 1
-  engine?: EngineThree | null; // Optional: for morph/bone blend control
+  engine?: LoomLargeThree | null; // Optional: for morph/bone blend control
   showBlendSlider?: boolean; // Whether to show the morph/bone blend slider
   disabled?: boolean;
   onValueChange?: (negId: string, posId: string, value: number) => void; // Optional callback for parent tracking

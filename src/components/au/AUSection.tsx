@@ -6,8 +6,7 @@ import DockableAccordionItem from './DockableAccordionItem';
 import AUSlider from './AUSlider';
 import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
-import { AUInfo, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS } from '../../engine/arkit/shapeDict';
-import { EngineThree } from '../../engine/EngineThree';
+import { AUInfo, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS, LoomLargeThree } from 'loomlarge';
 
 // Build CONTINUUM_PAIRS from CONTINUUM_PAIRS_MAP
 const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBlend: boolean }> = (() => {
@@ -117,7 +116,7 @@ const buildContinuumCurveData = (
 interface AUSectionProps {
   section: string;
   aus: AUInfo[];
-  engine?: EngineThree | null;
+  engine?: LoomLargeThree | null;
   disabled?: boolean;
   useCurveEditor?: boolean;
   auSnippetCurves?: Record<string, SnippetCurveData[]>;

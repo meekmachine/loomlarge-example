@@ -38,17 +38,14 @@ function AppContent() {
   const [animationReady, setAnimationReady] = useState(false);
 
   const handleReady = useCallback(
-    ({ meshes, model, scene, renderer, skyboxTexture }: {
+    ({ meshes, model }: {
       meshes: any[];
-      model?: any;
-      scene?: THREE.Scene;
-      renderer?: THREE.WebGLRenderer;
-      skyboxTexture?: THREE.Texture;
+      model: any;
     }) => {
       mark('app-handleReady-start');
 
       mark('engine-onReady-start');
-      engine.onReady({ meshes, model, scene, renderer, skyboxTexture });
+      engine.onReady({ meshes, model });
       mark('engine-onReady-end');
       measure('engine.onReady()', 'engine-onReady-start');
 
