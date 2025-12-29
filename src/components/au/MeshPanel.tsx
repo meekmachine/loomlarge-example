@@ -1,4 +1,4 @@
-import { useEffect, useState, memo, useCallback } from 'react';
+import { useEffect, useState, memo, useCallback, useMemo } from 'react';
 import {
   VStack,
   HStack,
@@ -23,6 +23,7 @@ interface MeshInfo {
   name: string;
   visible: boolean;
   morphCount: number;
+  category?: string;
 }
 
 interface MaterialConfig {
@@ -36,6 +37,21 @@ interface MaterialConfig {
 
 // Blending mode options for dropdown
 const BLENDING_OPTIONS = Object.keys(BLENDING_MODES) as BlendingMode[];
+
+// Category display names
+const CATEGORY_LABELS: Record<string, string> = {
+  body: 'Body',
+  eye: 'Eyes',
+  eyeOcclusion: 'Eye Occlusion',
+  tearLine: 'Tear Lines',
+  cornea: 'Cornea',
+  teeth: 'Teeth',
+  tongue: 'Tongue',
+  eyebrow: 'Eyebrows',
+  hair: 'Hair',
+  eyelash: 'Eyelashes',
+  other: 'Other',
+};
 
 // Material config sub-component
 function MeshMaterialConfig({
@@ -187,13 +203,14 @@ function MeshRow({
                 aria-label="Expand material config"
                 size="xs"
                 variant="ghost"
+                color="white"
               >
                 {expanded ? <LuChevronDown size={16} /> : <LuChevronRight size={16} />}
               </IconButton>
             </Collapsible.Trigger>
             <Text color={mesh.visible ? 'white' : 'gray.500'}>{mesh.name}</Text>
             {mesh.morphCount > 0 && (
-              <Text color="white">({mesh.morphCount} morphs)</Text>
+              <Text color="white">({mesh.morphCount})</Text>
             )}
           </HStack>
           <Switch.Root
@@ -209,6 +226,64 @@ function MeshRow({
         </HStack>
         <Collapsible.Content>
           <MeshMaterialConfig meshName={mesh.name} engine={engine} />
+        </Collapsible.Content>
+      </Box>
+    </Collapsible.Root>
+  );
+}
+
+// Category group component
+function CategoryGroup({
+  category,
+  meshes,
+  engine,
+  onToggle,
+}: {
+  category: string;
+  meshes: MeshInfo[];
+  engine: LoomLargeThree;
+  onToggle: (name: string, visible: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const label = CATEGORY_LABELS[category] || category;
+  const visibleCount = meshes.filter(m => m.visible).length;
+
+  return (
+    <Collapsible.Root open={expanded} onOpenChange={(details) => setExpanded(details.open)}>
+      <Box borderWidth="1px" borderColor="gray.600" borderRadius="md" mb={2}>
+        <HStack
+          justify="space-between"
+          p={2}
+          bg="gray.800"
+          borderRadius="md"
+          cursor="pointer"
+        >
+          <Collapsible.Trigger asChild>
+            <HStack gap={1} flex={1}>
+              <IconButton
+                aria-label="Expand category"
+                size="xs"
+                variant="ghost"
+                color="white"
+              >
+                {expanded ? <LuChevronDown size={16} /> : <LuChevronRight size={16} />}
+              </IconButton>
+              <Text fontSize="sm" fontWeight="bold" color="white">{label}</Text>
+              <Text fontSize="xs" color="white">({visibleCount}/{meshes.length})</Text>
+            </HStack>
+          </Collapsible.Trigger>
+        </HStack>
+        <Collapsible.Content>
+          <VStack align="stretch" gap={1} p={2}>
+            {meshes.map(m => (
+              <MeshRow
+                key={m.name}
+                mesh={m}
+                engine={engine}
+                onToggle={onToggle}
+              />
+            ))}
+          </VStack>
         </Collapsible.Content>
       </Box>
     </Collapsible.Root>
@@ -234,6 +309,27 @@ function MeshPanel({ engine, defaultExpanded = false }: MeshPanelProps) {
     refreshMeshes();
   }, [engine, refreshMeshes]);
 
+  // Group meshes by category
+  const groupedMeshes = useMemo(() => {
+    const groups: Record<string, MeshInfo[]> = {};
+    for (const mesh of meshes) {
+      const cat = mesh.category || 'other';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(mesh);
+    }
+    // Sort categories in a logical order
+    const order = ['body', 'eye', 'cornea', 'eyeOcclusion', 'tearLine', 'eyebrow', 'eyelash', 'teeth', 'tongue', 'hair', 'other'];
+    const sorted: [string, MeshInfo[]][] = [];
+    for (const cat of order) {
+      if (groups[cat]) sorted.push([cat, groups[cat]]);
+    }
+    // Add any categories not in the order list
+    for (const cat of Object.keys(groups)) {
+      if (!order.includes(cat)) sorted.push([cat, groups[cat]]);
+    }
+    return sorted;
+  }, [meshes]);
+
   if (!engine || meshes.length === 0) {
     return (
       <DockableAccordionItem title="Meshes" isDefaultExpanded={defaultExpanded}>
@@ -246,21 +342,18 @@ function MeshPanel({ engine, defaultExpanded = false }: MeshPanelProps) {
 
   return (
     <DockableAccordionItem title="Meshes" isDefaultExpanded={defaultExpanded}>
-      <VStack align="stretch" gap={3} p={2}>
+      <VStack align="stretch" gap={2} p={2}>
         <Text fontSize="xs" color="white">{meshes.length} meshes - click arrow to configure material</Text>
 
-        <Box borderWidth="1px" borderColor="gray.600" borderRadius="md" p={2}>
-          <VStack align="stretch" gap={1}>
-            {meshes.map(m => (
-              <MeshRow
-                key={m.name}
-                mesh={m}
-                engine={engine}
-                onToggle={toggleMesh}
-              />
-            ))}
-          </VStack>
-        </Box>
+        {groupedMeshes.map(([category, categoryMeshes]) => (
+          <CategoryGroup
+            key={category}
+            category={category}
+            meshes={categoryMeshes}
+            engine={engine}
+            onToggle={toggleMesh}
+          />
+        ))}
       </VStack>
     </DockableAccordionItem>
   );
