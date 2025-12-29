@@ -18,6 +18,7 @@ import VisemeSection from './au/VisemeSection';
 import TTSSection from './au/TTSSection';
 import EyeHeadTrackingSection from './au/EyeHeadTrackingSection';
 import BlinkSection from './au/BlinkSection';
+import HairSection from './au/HairSection';
 import DockableAccordionItem from './au/DockableAccordionItem';
 import PlaybackControls from './PlaybackControls';
 import MeshPanel from './au/MeshPanel';
@@ -109,7 +110,7 @@ const tabStyles = `
 `;
 
 // Tab definitions
-type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'meshes' | 'skybox';
+type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
 
 interface TabDef {
   id: TabId;
@@ -124,6 +125,7 @@ const TABS: TabDef[] = [
   { id: 'aus', icon: FaSmile, label: 'Action Units' },
   { id: 'visemes', icon: FaComment, label: 'Visemes' },
   { id: 'tracking', icon: FaEye, label: 'Eye & Head' },
+  { id: 'hair', icon: FaCut, label: 'Hair' },
   { id: 'meshes', icon: FaCubes, label: 'Meshes' },
   { id: 'skybox', icon: FaGlobe, label: 'Skybox' },
 ];
@@ -168,6 +170,7 @@ const TAB_ICONS: Record<TabId, React.ReactNode> = {
   aus: <FaSmile />,
   visemes: <FaComment />,
   tracking: <FaEye />,
+  hair: <FaCut />,
   meshes: <FaCubes />,
   skybox: <FaGlobe />,
 };
@@ -255,6 +258,11 @@ const MeshesTabContent = memo(({ engine }: { engine: LoomLargeThree | null }) =>
 // Skybox Tab
 const SkyboxTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => (
   <SkyboxSection engine={engine} disabled={disabled} defaultExpanded />
+));
+
+// Hair Tab
+const HairTabContent = memo(({ disabled }: { disabled: boolean }) => (
+  <HairSection disabled={disabled} defaultExpanded />
 ));
 
 // AU Controls panel
@@ -536,6 +544,9 @@ const MemoizedMeshesContent = memo(({ engine }: { engine: LoomLargeThree | null 
 const MemoizedSkyboxContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
   <SkyboxTabContent engine={engine} disabled={disabled} />
 );
+const MemoizedHairContent = memo(({ disabled }: { disabled: boolean }) =>
+  <HairTabContent disabled={disabled} />
+);
 
 const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled }: TabContentContainerProps) => {
   return (
@@ -568,6 +579,11 @@ const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled }: 
       {mountedTabs.has('tracking') && (
         <TabPanel tabId="tracking" isActive={activeTab === 'tracking'}>
           <MemoizedTrackingContent engine={engine} disabled={disabled} />
+        </TabPanel>
+      )}
+      {mountedTabs.has('hair') && (
+        <TabPanel tabId="hair" isActive={activeTab === 'hair'}>
+          <MemoizedHairContent disabled={disabled} />
         </TabPanel>
       )}
       {mountedTabs.has('meshes') && (

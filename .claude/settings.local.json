@@ -9,7 +9,19 @@
       "Bash(tsc:*)",
       "Bash(git checkout:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npx tsc --noEmit --skipLibCheck)",
+      "Bash(git branch:*)",
+      "Bash(git stash:*)",
+      "Bash(yarn install:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(npm link:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(npm publish)",
+      "Bash(chmod:*)",
+      "Bash(git merge:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

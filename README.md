@@ -365,6 +365,21 @@ Create your own modules by following this pattern:
 
 ## Development
 
+### LoomLarge Package Linking
+
+This project depends on the `loomlarge` npm package. During development, you can switch between the local development version and the published npm version:
+
+```bash
+# Use local symlinked version (for development)
+npm run link:loomlarge
+
+# Use published npm version (for testing releases)
+npm run unlink:loomlarge
+```
+
+- **link:loomlarge** - Creates a symlink to `../LoomLarge` so changes in the local LoomLarge repo are immediately available
+- **unlink:loomlarge** - Removes the symlink and installs the published version from npm registry
+
 ### Running the Dev Server
 
 ```bash

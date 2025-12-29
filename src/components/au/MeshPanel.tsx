@@ -10,9 +10,22 @@ import {
   NativeSelect,
   Slider,
 } from '@chakra-ui/react';
-import { LoomLargeThree, BLENDING_MODES, type BlendingMode } from 'loomlarge';
+import { LoomLargeThree } from 'loomlarge';
+import * as THREE from 'three';
 import DockableAccordionItem from './DockableAccordionItem';
 import { LuChevronDown, LuChevronRight } from 'react-icons/lu';
+
+// Blending modes mapping (THREE.js blending constants)
+const BLENDING_MODES = {
+  Normal: THREE.NormalBlending,
+  Additive: THREE.AdditiveBlending,
+  Subtractive: THREE.SubtractiveBlending,
+  Multiply: THREE.MultiplyBlending,
+  Custom: THREE.CustomBlending,
+  None: THREE.NoBlending,
+} as const;
+
+type BlendingMode = keyof typeof BLENDING_MODES;
 
 interface MeshPanelProps {
   engine: LoomLargeThree | null;
@@ -53,6 +66,14 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+// Type guard for engines that support material config
+function hasMaterialConfig(engine: LoomLargeThree): engine is LoomLargeThree & {
+  getMeshMaterialConfig: (name: string) => MaterialConfig | null;
+  setMeshMaterialConfig: (name: string, config: Partial<MaterialConfig>) => void;
+} {
+  return 'getMeshMaterialConfig' in engine && 'setMeshMaterialConfig' in engine;
+}
+
 // Material config sub-component
 function MeshMaterialConfig({
   meshName,
@@ -64,11 +85,13 @@ function MeshMaterialConfig({
   const [config, setConfig] = useState<MaterialConfig | null>(null);
 
   useEffect(() => {
-    const c = engine.getMeshMaterialConfig(meshName);
-    if (c) setConfig(c);
+    if (hasMaterialConfig(engine)) {
+      const c = engine.getMeshMaterialConfig(meshName);
+      if (c) setConfig(c);
+    }
   }, [engine, meshName]);
 
-  if (!config) return null;
+  if (!config || !hasMaterialConfig(engine)) return null;
 
   const updateConfig = (updates: Partial<MaterialConfig>) => {
     engine.setMeshMaterialConfig(meshName, updates);

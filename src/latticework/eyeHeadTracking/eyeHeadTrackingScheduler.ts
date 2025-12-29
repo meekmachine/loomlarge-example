@@ -266,35 +266,39 @@ export class EyeHeadTrackingScheduler {
    * Build continuum curves for a bidirectional axis
    * Value: negative values use negativeAU, positive values use positiveAU
    * This matches the continuum slider behavior
+   *
+   * CRITICAL: Do NOT use inherit: true - it causes "only look left then snap right" bug.
+   * Always use two keyframes: {time: 0, intensity: 0} -> {time: duration, intensity: value}
+   * This ensures smooth transitions from neutral to target. (See commit 2a410f9)
    */
   private buildContinuumCurves(
     negativeAU: string,
     positiveAU: string,
     value: number,
     duration: number
-  ): Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> {
-    const curves: Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> = {};
-    const inheritStart = () => ({ time: 0, intensity: 0, inherit: true }); // Seed from current AU to avoid snaps
+  ): Record<string, Array<{ time: number; intensity: number }>> {
+    const curves: Record<string, Array<{ time: number; intensity: number }>> = {};
 
     // ALWAYS schedule BOTH directions for proper transitions
+    // Use two keyframes: start at 0, transition to target value over duration
     if (value < 0) {
       // Negative direction (left/down)
       curves[negativeAU] = [
-        inheritStart(),
+        { time: 0, intensity: 0 },
         { time: duration, intensity: Math.abs(value) }
       ];
       curves[positiveAU] = [
-        inheritStart(),
+        { time: 0, intensity: 0 },
         { time: duration, intensity: 0 }
       ];
     } else {
       // Positive direction (right/up)
       curves[negativeAU] = [
-        inheritStart(),
+        { time: 0, intensity: 0 },
         { time: duration, intensity: 0 }
       ];
       curves[positiveAU] = [
-        inheritStart(),
+        { time: 0, intensity: 0 },
         { time: duration, intensity: value }
       ];
     }

@@ -12,8 +12,8 @@
     "deploy": "bash scripts/deploy.sh",
     "typecheck": "tsc --noEmit",
     "prepare": "panda codegen",
-    "link:loomlarge": "bash scripts/link-loomlarge.sh",
-    "publish:loomlarge": "bash scripts/publish-loomlarge.sh"
+    "link:loomlarge": "rm -rf node_modules/loomlarge && ln -s ../../LoomLarge node_modules/loomlarge && echo 'Linked to local LoomLarge for development'",
+    "unlink:loomlarge": "rm -rf node_modules/loomlarge node_modules/.vite && npm install loomlarge && echo 'Now using published npm version of loomlarge (vite cache cleared)'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
@@ -30,7 +30,7 @@
     "@xstate/react": "^6.0.0",
     "face-api.js": "^0.22.2",
     "livekit-client": "^2.8.1",
-    "loomlarge": "^0.1.6",
+    "loomlarge": "^0.3.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

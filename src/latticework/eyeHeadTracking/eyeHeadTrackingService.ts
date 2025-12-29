@@ -714,41 +714,51 @@ export class EyeHeadTrackingService {
         }
       );
     } else if (this.config.engine) {
-      // Direct engine path - simpler, bypasses animation scheduler
-      // Use transitionAU for each axis (yaw/pitch)
-      // Only call ONE AU based on continuum sign (calling both would overwrite the bone)
+      // Direct engine path - bypasses animation scheduler
+      // CRITICAL: Must set BOTH AUs in each continuum pair to avoid snap/stick bugs
+      // Continuum axis = positiveAU - negativeAU, so leftover values cause incorrect results
       if (applyEyes && this.config.eyeTrackingEnabled) {
         const eyeYaw = smoothedTarget.x * eyeIntensity;
         const eyePitch = smoothedTarget.y * eyeIntensity;
-        // Eyes horizontal: AU61 (left) / AU62 (right)
-        // Only call ONE AU based on continuum sign (calling both would overwrite the bone)
-        if (eyeYaw < 0) {
-          this.config.engine.transitionAU?.(61, Math.abs(eyeYaw), eyeDuration);
+        // Eyes: use transitionContinuum to avoid bone axis overwrite bug
+        // (calling transitionAU on both AUs in a pair overwrites the bone - see engine/README.md)
+        if (this.config.engine.transitionContinuum) {
+          this.config.engine.transitionContinuum(61, 62, eyeYaw, eyeDuration);
+          this.config.engine.transitionContinuum(64, 63, eyePitch, eyeDuration);
         } else {
-          this.config.engine.transitionAU?.(62, eyeYaw, eyeDuration);
-        }
-        // Eyes vertical: AU64 (down) / AU63 (up)
-        if (eyePitch < 0) {
-          this.config.engine.transitionAU?.(64, Math.abs(eyePitch), eyeDuration);
-        } else {
-          this.config.engine.transitionAU?.(63, eyePitch, eyeDuration);
+          // Fallback: only set the active direction AU
+          if (eyeYaw < 0) {
+            this.config.engine.transitionAU?.(61, Math.abs(eyeYaw), eyeDuration);
+          } else {
+            this.config.engine.transitionAU?.(62, eyeYaw, eyeDuration);
+          }
+          if (eyePitch < 0) {
+            this.config.engine.transitionAU?.(64, Math.abs(eyePitch), eyeDuration);
+          } else {
+            this.config.engine.transitionAU?.(63, eyePitch, eyeDuration);
+          }
         }
       }
 
       if (applyHead && this.config.headTrackingEnabled && this.config.headFollowEyes) {
         const headYaw = smoothedTarget.x * headIntensity;
         const headPitch = smoothedTarget.y * headIntensity;
-        // Head horizontal: AU51 (left) / AU52 (right)
-        if (headYaw < 0) {
-          this.config.engine.transitionAU?.(51, Math.abs(headYaw), headDuration);
+        // Head: use transitionContinuum to avoid bone axis overwrite bug
+        if (this.config.engine.transitionContinuum) {
+          this.config.engine.transitionContinuum(51, 52, headYaw, headDuration);
+          this.config.engine.transitionContinuum(54, 53, headPitch, headDuration);
         } else {
-          this.config.engine.transitionAU?.(52, headYaw, headDuration);
-        }
-        // Head vertical: AU54 (down) / AU53 (up)
-        if (headPitch < 0) {
-          this.config.engine.transitionAU?.(54, Math.abs(headPitch), headDuration);
-        } else {
-          this.config.engine.transitionAU?.(53, headPitch, headDuration);
+          // Fallback: only set the active direction AU
+          if (headYaw < 0) {
+            this.config.engine.transitionAU?.(51, Math.abs(headYaw), headDuration);
+          } else {
+            this.config.engine.transitionAU?.(52, headYaw, headDuration);
+          }
+          if (headPitch < 0) {
+            this.config.engine.transitionAU?.(54, Math.abs(headPitch), headDuration);
+          } else {
+            this.config.engine.transitionAU?.(53, headPitch, headDuration);
+          }
         }
       }
     } else {
