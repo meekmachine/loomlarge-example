@@ -6,24 +6,28 @@ import DockableAccordionItem from './DockableAccordionItem';
 import AUSlider from './AUSlider';
 import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
-import { AUInfo, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS, LoomLargeThree } from 'loomlarge';
+import { AUInfo, LoomLargeThree } from 'loomlarge';
+import { FISH_CONTINUUM_PAIRS_MAP, FISH_CONTINUUM_LABELS } from '../../presets/bettaFish';
 
-// Build CONTINUUM_PAIRS from CONTINUUM_PAIRS_MAP
+// Build CONTINUUM_PAIRS from fish preset's CONTINUUM_PAIRS_MAP
 const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBlend: boolean }> = (() => {
   const seen = new Set<string>();
   const pairs: Array<{ negative: number; positive: number; showBlend: boolean }> = [];
-  for (const [auIdStr, info] of Object.entries(CONTINUUM_PAIRS_MAP)) {
+  for (const [auIdStr, info] of Object.entries(FISH_CONTINUUM_PAIRS_MAP)) {
     const auId = Number(auIdStr);
     if (info.isNegative) {
       const key = `${auId}-${info.pairId}`;
       if (!seen.has(key)) {
         seen.add(key);
-        pairs.push({ negative: auId, positive: info.pairId, showBlend: true });
+        pairs.push({ negative: auId, positive: info.pairId, showBlend: false });
       }
     }
   }
   return pairs;
 })();
+
+// Use fish continuum labels
+const CONTINUUM_LABELS = FISH_CONTINUUM_LABELS;
 import type { NormalizedSnippet } from '../../latticework/animation/types';
 import { useEngineState } from '../../context/engineContext';
 

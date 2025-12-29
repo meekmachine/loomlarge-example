@@ -27,57 +27,57 @@ import type { BoneBinding, AUInfo, CompositeRotation } from 'loomlarge';
 export const FISH_BONES = [
   "Armature_rootJoint",
   "Bone_Armature",
-  "Bone.001_Armature",
-  "Bone.009_Armature",
-  "Bone.027_Armature",
-  "Bone.029_Armature",
-  "Bone.031_Armature",
-  "Bone.028_Armature",
-  "Bone.030_Armature",
-  "Bone.032_Armature",
-  "Bone.010_Armature",
-  "Bone.012_Armature",
-  "Bone.014_Armature",
-  "Bone.016_Armature",
-  "Bone.011_Armature",
-  "Bone.013_Armature",
-  "Bone.015_Armature",
-  "Bone.017_Armature",
-  "Bone.002_Armature",
-  "Bone.003_Armature",
-  "Bone.004_Armature",
-  "Bone.005_Armature",
-  "Bone.020_Armature",
-  "Bone.025_Armature",
-  "Bone.026_Armature",
-  "Bone.039_Armature",
-  "Bone.040_Armature",
-  "Bone.041_Armature",
-  "Bone.042_Armature",
-  "Bone.043_Armature",
-  "Bone.044_Armature",
-  "Bone.045_Armature",
-  "Bone.019_Armature",
-  "Bone.023_Armature",
-  "Bone.024_Armature",
-  "Bone.034_Armature",
-  "Bone.036_Armature",
-  "Bone.038_Armature",
-  "Bone.018_Armature",
-  "Bone.021_Armature",
-  "Bone.022_Armature",
-  "Bone.033_Armature",
-  "Bone.035_Armature",
-  "Bone.037_Armature",
-  "Bone.046_Armature",
-  "Bone.048_Armature",
-  "Bone.050_Armature",
-  "Bone.047_Armature",
-  "Bone.049_Armature",
-  "Bone.051_Armature",
-  "Bone.006_Armature",
-  "Bone.007_Armature",
-  "Bone.008_Armature"
+  "Bone001_Armature",
+  "Bone009_Armature",
+  "Bone027_Armature",
+  "Bone029_Armature",
+  "Bone031_Armature",
+  "Bone028_Armature",
+  "Bone030_Armature",
+  "Bone032_Armature",
+  "Bone010_Armature",
+  "Bone012_Armature",
+  "Bone014_Armature",
+  "Bone016_Armature",
+  "Bone011_Armature",
+  "Bone013_Armature",
+  "Bone015_Armature",
+  "Bone017_Armature",
+  "Bone002_Armature",
+  "Bone003_Armature",
+  "Bone004_Armature",
+  "Bone005_Armature",
+  "Bone020_Armature",
+  "Bone025_Armature",
+  "Bone026_Armature",
+  "Bone039_Armature",
+  "Bone040_Armature",
+  "Bone041_Armature",
+  "Bone042_Armature",
+  "Bone043_Armature",
+  "Bone044_Armature",
+  "Bone045_Armature",
+  "Bone019_Armature",
+  "Bone023_Armature",
+  "Bone024_Armature",
+  "Bone034_Armature",
+  "Bone036_Armature",
+  "Bone038_Armature",
+  "Bone018_Armature",
+  "Bone021_Armature",
+  "Bone022_Armature",
+  "Bone033_Armature",
+  "Bone035_Armature",
+  "Bone037_Armature",
+  "Bone046_Armature",
+  "Bone048_Armature",
+  "Bone050_Armature",
+  "Bone047_Armature",
+  "Bone049_Armature",
+  "Bone051_Armature",
+  "Bone006_Armature",
+  "Bone007_Armature",
+  "Bone008_Armature"
 ] as const;
 
 // ============================================================================
@@ -88,43 +88,43 @@ export const FISH_BONE_NODES = {
   // Root and body
   ROOT: 'Armature_rootJoint',
   BODY_ROOT: 'Bone_Armature',
-  HEAD: 'Bone.001_Armature',
+  HEAD: 'Bone001_Armature',
 
   // Body spine (front to back)
-  BODY_FRONT: 'Bone.002_Armature',
-  BODY_MID: 'Bone.003_Armature',
-  BODY_BACK: 'Bone.004_Armature',
-  TAIL_BASE: 'Bone.005_Armature',
+  BODY_FRONT: 'Bone002_Armature',
+  BODY_MID: 'Bone003_Armature',
+  BODY_BACK: 'Bone004_Armature',
+  TAIL_BASE: 'Bone005_Armature',
 
   // Pectoral fins (left/right) - for swimming motion
-  PECTORAL_L: 'Bone.046_Armature',
-  PECTORAL_L_MID: 'Bone.048_Armature',
-  PECTORAL_L_TIP: 'Bone.050_Armature',
-  PECTORAL_R: 'Bone.047_Armature',
-  PECTORAL_R_MID: 'Bone.049_Armature',
-  PECTORAL_R_TIP: 'Bone.051_Armature',
+  PECTORAL_L: 'Bone046_Armature',
+  PECTORAL_L_MID: 'Bone048_Armature',
+  PECTORAL_L_TIP: 'Bone050_Armature',
+  PECTORAL_R: 'Bone047_Armature',
+  PECTORAL_R_MID: 'Bone049_Armature',
+  PECTORAL_R_TIP: 'Bone051_Armature',
 
   // Dorsal fin
-  DORSAL_ROOT: 'Bone.006_Armature',
-  DORSAL_L: 'Bone.007_Armature',
-  DORSAL_R: 'Bone.008_Armature',
+  DORSAL_ROOT: 'Bone006_Armature',
+  DORSAL_L: 'Bone007_Armature',
+  DORSAL_R: 'Bone008_Armature',
 
   // Head area (eyes/gills - left side)
-  EYE_AREA_L_1: 'Bone.009_Armature',
-  EYE_AREA_L_2: 'Bone.010_Armature',
-  EYE_AREA_L_3: 'Bone.011_Armature',
+  EYE_AREA_L_1: 'Bone009_Armature',
+  EYE_AREA_L_2: 'Bone010_Armature',
+  EYE_AREA_L_3: 'Bone011_Armature',
 
   // Head area (eyes/gills - right side)
-  EYE_AREA_R_1: 'Bone.027_Armature',
-  EYE_AREA_R_2: 'Bone.028_Armature',
+  EYE_AREA_R_1: 'Bone027_Armature',
+  EYE_AREA_R_2: 'Bone028_Armature',
 
   // Tail fins (multiple chains for flowing motion)
-  TAIL_FIN_1: 'Bone.020_Armature',
-  TAIL_FIN_2: 'Bone.039_Armature',
-  TAIL_FIN_3: 'Bone.019_Armature',
-  TAIL_FIN_4: 'Bone.034_Armature',
-  TAIL_FIN_5: 'Bone.018_Armature',
-  TAIL_FIN_6: 'Bone.033_Armature',
+  TAIL_FIN_1: 'Bone020_Armature',
+  TAIL_FIN_2: 'Bone039_Armature',
+  TAIL_FIN_3: 'Bone019_Armature',
+  TAIL_FIN_4: 'Bone034_Armature',
+  TAIL_FIN_5: 'Bone018_Armature',
+  TAIL_FIN_6: 'Bone033_Armature',
 } as const;
 
 // ============================================================================
@@ -218,6 +218,41 @@ export const FISH_AU_INFO: Record<string, AUInfo> = {
 
   // Fins & Tail
   '12': { id: '12', name: 'Tail Sweep', facePart: 'Fins & Tail' },
+};
+
+// ============================================================================
+// CONTINUUM PAIRS - Define which AUs form bidirectional pairs for sliders
+// ============================================================================
+
+/**
+ * Fish continuum pairs - maps AU ID to its partner for bidirectional sliders
+ * Format matches loomlarge's CONTINUUM_PAIRS_MAP
+ */
+export const FISH_CONTINUUM_PAIRS_MAP: Record<number, {
+  pairId: number;
+  isNegative: boolean;
+  axis: 'pitch' | 'yaw' | 'roll';
+  node: string;
+}> = {
+  // Turn (yaw) - head left/right
+  [FishAction.TURN_LEFT]: { pairId: FishAction.TURN_RIGHT, isNegative: true, axis: 'yaw', node: 'HEAD' },
+  [FishAction.TURN_RIGHT]: { pairId: FishAction.TURN_LEFT, isNegative: false, axis: 'yaw', node: 'HEAD' },
+  // Pitch - nose up/down
+  [FishAction.PITCH_DOWN]: { pairId: FishAction.PITCH_UP, isNegative: true, axis: 'pitch', node: 'HEAD' },
+  [FishAction.PITCH_UP]: { pairId: FishAction.PITCH_DOWN, isNegative: false, axis: 'pitch', node: 'HEAD' },
+  // Roll - body tilt left/right
+  [FishAction.ROLL_LEFT]: { pairId: FishAction.ROLL_RIGHT, isNegative: true, axis: 'roll', node: 'BODY_ROOT' },
+  [FishAction.ROLL_RIGHT]: { pairId: FishAction.ROLL_LEFT, isNegative: false, axis: 'roll', node: 'BODY_ROOT' },
+};
+
+/**
+ * Human-readable labels for fish continuum pairs
+ * Key format: "negativeAU-positiveAU"
+ */
+export const FISH_CONTINUUM_LABELS: Record<string, string> = {
+  '2-3': 'Turn — Left ↔ Right',
+  '5-4': 'Pitch — Down ↔ Up',
+  '6-7': 'Roll — Left ↔ Right',
 };
 
 // ============================================================================

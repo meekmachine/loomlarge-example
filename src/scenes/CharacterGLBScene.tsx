@@ -199,15 +199,42 @@ export default function CharacterGLBScene({
           const action = mixer!.clipAction(clip);
           action.play();
           console.log(`Playing animation: ${clip.name}, duration: ${clip.duration}s, tracks: ${clip.tracks.length}`);
-          // Log what the animation controls (bones, morph targets, etc.)
-          clip.tracks.forEach((track, i) => {
-            if (i < 10) { // Log first 10 tracks to avoid spam
-              console.log(`  Track ${i}: ${track.name} (${track.constructor.name})`);
+
+          // Analyze animation tracks to understand bone movements
+          console.log(`\n========== ANIMATION TRACK ANALYSIS ==========`);
+          const tracksByBone: Record<string, { position?: any; quaternion?: any; scale?: any }> = {};
+
+          clip.tracks.forEach((track) => {
+            // Parse track name: "boneName.property" (e.g., "Bone.001_Armature.quaternion")
+            const [bonePath, property] = track.name.split('.');
+            const boneName = bonePath.split('/').pop() || bonePath;
+
+            if (!tracksByBone[boneName]) tracksByBone[boneName] = {};
+
+            // Get min/max values to understand range of motion
+            const values = track.values;
+            if (property === 'quaternion' && values.length >= 4) {
+              // For quaternions, sample a few keyframes and convert to euler
+              const samples: string[] = [];
+              for (let i = 0; i < Math.min(5, values.length / 4); i++) {
+                const q = new THREE.Quaternion(
+                  values[i * 4], values[i * 4 + 1], values[i * 4 + 2], values[i * 4 + 3]
+                );
+                const euler = new THREE.Euler().setFromQuaternion(q);
+                samples.push(`(${(euler.x * 180/Math.PI).toFixed(1)}°, ${(euler.y * 180/Math.PI).toFixed(1)}°, ${(euler.z * 180/Math.PI).toFixed(1)}°)`);
+              }
+              tracksByBone[boneName].quaternion = samples;
             }
           });
-          if (clip.tracks.length > 10) {
-            console.log(`  ... and ${clip.tracks.length - 10} more tracks`);
-          }
+
+          // Log bones with significant rotation
+          console.log(`\nBones with rotation animation:`);
+          Object.entries(tracksByBone).forEach(([bone, data]) => {
+            if (data.quaternion) {
+              console.log(`  ${bone}: ${data.quaternion.join(' → ')}`);
+            }
+          });
+          console.log(`========================================\n`);
         });
       }
 
