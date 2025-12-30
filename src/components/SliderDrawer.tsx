@@ -11,7 +11,7 @@ import {
   CloseButton,
 } from '@chakra-ui/react';
 import { useSelector } from '@xstate/react';
-import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe } from 'react-icons/fa';
+import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe, FaUser } from 'react-icons/fa';
 import { AU_INFO, type AUInfo } from 'loomlarge';
 import AUSection from './au/AUSection';
 import VisemeSection from './au/VisemeSection';
@@ -23,9 +23,11 @@ import DockableAccordionItem from './au/DockableAccordionItem';
 import PlaybackControls from './PlaybackControls';
 import MeshPanel from './au/MeshPanel';
 import SkyboxSection from './au/SkyboxSection';
+import CharacterSection from './au/CharacterSection';
 import { useThreeState } from '../context/threeContext';
 import type { NormalizedSnippet, CurvePoint } from '../latticework/animation/types';
 import { LoomLargeThree } from 'loomlarge';
+import type { CharacterAnnotationConfig } from '../camera/types';
 
 // Stable empty array reference - MUST be outside component to prevent re-renders
 const EMPTY_SNIPPETS: NormalizedSnippet[] = [];
@@ -110,7 +112,7 @@ const tabStyles = `
 `;
 
 // Tab definitions
-type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
+type TabId = 'character' | 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
 
 interface TabDef {
   id: TabId;
@@ -119,6 +121,7 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  { id: 'character', icon: FaUser, label: 'Character' },
   { id: 'animation', icon: FaPlay, label: 'Animation' },
   { id: 'speech', icon: FaMicrophone, label: 'Speech' },
   { id: 'blink', icon: FaRegEyeSlash, label: 'Blink' },
@@ -134,6 +137,8 @@ interface SliderDrawerProps {
   isOpen: boolean;
   onToggle: () => void;
   disabled?: boolean;
+  onCharacterChange?: (config: CharacterAnnotationConfig) => void;
+  currentCharacterConfig?: CharacterAnnotationConfig;
 }
 
 type Keyframe = { time: number; value: number };
@@ -164,6 +169,7 @@ function injectStyles() {
 
 // Icon components map - avoid recreating elements
 const TAB_ICONS: Record<TabId, React.ReactNode> = {
+  character: <FaUser />,
   animation: <FaPlay />,
   speech: <FaMicrophone />,
   blink: <FaRegEyeSlash />,
@@ -504,6 +510,8 @@ interface TabContentContainerProps {
   mountedTabs: Set<TabId>;
   engine: LoomLargeThree | null;
   disabled: boolean;
+  onCharacterChange?: (config: CharacterAnnotationConfig) => void;
+  currentCharacterConfig?: CharacterAnnotationConfig;
 }
 
 // Memoized content wrapper - uses CSS class for visibility (no re-render on tab switch)
@@ -547,10 +555,34 @@ const MemoizedSkyboxContent = memo(({ engine, disabled }: { engine: LoomLargeThr
 const MemoizedHairContent = memo(({ disabled }: { disabled: boolean }) =>
   <HairTabContent disabled={disabled} />
 );
+const MemoizedCharacterContent = memo(({
+  onCharacterChange,
+  currentCharacterConfig,
+  disabled
+}: {
+  onCharacterChange?: (config: CharacterAnnotationConfig) => void;
+  currentCharacterConfig?: CharacterAnnotationConfig;
+  disabled: boolean;
+}) =>
+  <CharacterSection
+    onCharacterChange={onCharacterChange}
+    currentCharacterConfig={currentCharacterConfig}
+    disabled={disabled}
+  />
+);
 
-const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled }: TabContentContainerProps) => {
+const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled, onCharacterChange, currentCharacterConfig }: TabContentContainerProps) => {
   return (
     <>
+      {mountedTabs.has('character') && (
+        <TabPanel tabId="character" isActive={activeTab === 'character'}>
+          <MemoizedCharacterContent
+            onCharacterChange={onCharacterChange}
+            currentCharacterConfig={currentCharacterConfig}
+            disabled={disabled}
+          />
+        </TabPanel>
+      )}
       {mountedTabs.has('animation') && (
         <TabPanel tabId="animation" isActive={activeTab === 'animation'}>
           <MemoizedAnimationContent />
@@ -606,13 +638,15 @@ export default function SliderDrawer({
   isOpen,
   onToggle,
   disabled = false,
+  onCharacterChange,
+  currentCharacterConfig,
 }: SliderDrawerProps) {
   const { engine } = useThreeState();
 
-  const [activeTab, setActiveTab] = useState<TabId>('animation');
+  const [activeTab, setActiveTab] = useState<TabId>('character');
 
   // Track which tabs have been mounted (for lazy loading)
-  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set(['animation']));
+  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set(['character']));
 
   // Lazy rendering - only render content after first open
   const hasBeenOpenedRef = useRef(false);
@@ -676,6 +710,8 @@ export default function SliderDrawer({
                       mountedTabs={mountedTabs}
                       engine={engine}
                       disabled={disabled}
+                      onCharacterChange={onCharacterChange}
+                      currentCharacterConfig={currentCharacterConfig}
                     />
                   </Drawer.Body>
                 </Box>

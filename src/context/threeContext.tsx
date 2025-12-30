@@ -1,91 +1,64 @@
-import React, { createContext, useContext, useRef, useEffect } from 'react';
-import { LoomLargeThree, CC4_PRESET } from 'loomlarge';
-import { createAnimationService, type AnimationService } from '../latticework/animation/animationService';
-import type { Engine } from '../latticework/animation/types';
+import React, { createContext, useContext, useState, useCallback } from 'react';
+import type { LoomLargeThree } from 'loomlarge';
+import type { AnimationService } from '../latticework/animation/animationService';
 
 export type ThreeContextValue = {
-  engine: LoomLargeThree;
-  /** Animation service for scheduling and playing animation snippets */
-  anim: AnimationService;
+  engine: LoomLargeThree | null;
+  anim: AnimationService | null;
+  setEngine: (engine: LoomLargeThree, anim: AnimationService) => void;
 };
 
 const ThreeCtx = createContext<ThreeContextValue | null>(null);
 
 /**
- * Create an Engine adapter that wraps LoomLargeThree for the animation service.
- * This adapts LoomLargeThree's methods to the Engine interface expected by AnimationService.
- */
-function createEngineAdapter(engine: LoomLargeThree): Engine {
-  return {
-    applyAU: (id, v) => engine.setAU(id as number, v),
-    setMorph: (key, v) => engine.setMorph(key, v),
-    transitionAU: (id, v, dur, balance) => engine.transitionAU(id as number, v, dur, balance),
-    transitionMorph: (key, v, dur) => engine.transitionMorph(key, v, dur),
-    setViseme: (idx, v, jawScale) => engine.setViseme(idx, v, jawScale),
-    transitionViseme: (idx, v, dur, jawScale) => engine.transitionViseme(idx, v, dur, jawScale),
-    onSnippetEnd: (name) => {
-      try {
-        window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
-      } catch {}
-      try {
-        (window as any).__lastSnippetEnded = name;
-      } catch {}
-    }
-  };
-}
-
-/**
- * ThreeProvider - Provides LoomLargeThree and animation service via React context.
+ * ThreeProvider - Simple context holder for LoomLarge engine and animation service.
  *
- * LoomLargeThree handles low-level rendering (morphs, bones, transitions).
- * AnimationService handles high-level animation scheduling and playback.
- * This provider creates both and wires them together.
+ * The engine is created in CharacterGLBScene and passed up via onReady callback.
+ * This provider just holds the references and makes them available to the rest of the app.
  */
 export const ThreeProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
-  const engineRef = useRef<LoomLargeThree | null>(null);
-  const animRef = useRef<AnimationService | null>(null);
+  const [engine, setEngineState] = useState<LoomLargeThree | null>(null);
+  const [anim, setAnimState] = useState<AnimationService | null>(null);
 
-  // Create engine singleton (once, outside of render cycle)
-  if (!engineRef.current) {
-    engineRef.current = new LoomLargeThree({ auMappings: CC4_PRESET });
-    if (typeof window !== 'undefined') {
-      (window as any).engine = engineRef.current;
-    }
-  }
+  const setEngine = useCallback((newEngine: LoomLargeThree, newAnim: AnimationService) => {
+    setEngineState(newEngine);
+    setAnimState(newAnim);
+  }, []);
 
-  // Create animation service (once, after engine exists)
-  if (!animRef.current && engineRef.current) {
-    const host = createEngineAdapter(engineRef.current);
-    animRef.current = createAnimationService(host);
-  }
-
-  const engine = engineRef.current;
-  const anim = animRef.current!;
-
-  // Start engine on mount, dispose both on unmount
-  useEffect(() => {
-    engine.start();
-    return () => {
-      anim.dispose();
-      engine.dispose();
-    };
-  }, [engine, anim]);
-
-  // Stable context value - references never change
-  const valueRef = useRef<ThreeContextValue | null>(null);
-  if (!valueRef.current) {
-    valueRef.current = { engine, anim };
-  }
-
-  return <ThreeCtx.Provider value={valueRef.current}>{children}</ThreeCtx.Provider>;
+  return (
+    <ThreeCtx.Provider value={{ engine, anim, setEngine }}>
+      {children}
+    </ThreeCtx.Provider>
+  );
 };
 
+/**
+ * Hook to access engine and animation service.
+ * Throws if engine is not yet available.
+ */
 export function useThreeState() {
   const ctx = useContext(ThreeCtx);
   if (!ctx) throw new Error('useThreeState must be used within a ThreeProvider');
-  return ctx;
+  if (!ctx.engine || !ctx.anim) {
+    throw new Error('Engine not yet initialized. Wait for CharacterGLBScene onReady.');
+  }
+  return { engine: ctx.engine, anim: ctx.anim };
 }
 
+/**
+ * Hook to access engine and animation service, or null if not yet ready.
+ * Use this when you need to handle the loading state.
+ */
 export function useThreeOptional() {
-  return useContext(ThreeCtx);
+  const ctx = useContext(ThreeCtx);
+  return ctx ? { engine: ctx.engine, anim: ctx.anim, setEngine: ctx.setEngine } : null;
+}
+
+/**
+ * Hook to get the setEngine callback for wiring up the scene.
+ */
+export function useSetEngine() {
+  const ctx = useContext(ThreeCtx);
+  if (!ctx) throw new Error('useSetEngine must be used within a ThreeProvider');
+  return ctx.setEngine;
 }

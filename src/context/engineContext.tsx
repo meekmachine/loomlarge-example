@@ -1,8 +1,17 @@
-import { useThreeState, type ThreeContextValue } from './threeContext';
+import { useThreeState, useThreeOptional, type ThreeContextValue } from './threeContext';
 
-export type EngineContextValue = ThreeContextValue;
+// Re-export for backwards compatibility
+export type EngineContextValue = {
+  engine: NonNullable<ThreeContextValue['engine']>;
+  anim: NonNullable<ThreeContextValue['anim']>;
+};
 
-// Simplified: only EngineThree for now
 export function useEngineState(): EngineContextValue {
   return useThreeState();
+}
+
+export function useEngineOptional() {
+  const ctx = useThreeOptional();
+  if (!ctx || !ctx.engine || !ctx.anim) return null;
+  return { engine: ctx.engine, anim: ctx.anim };
 }

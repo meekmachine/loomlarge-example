@@ -1,23 +1,14 @@
-import { useCallback, useState, useEffect, useMemo, lazy, Suspense } from 'react';
-import CharacterGLBScene from './scenes/CharacterGLBScene';
+import { useCallback, useState, useEffect, lazy, Suspense } from 'react';
+import CharacterGLBScene, { type CharacterReady } from './scenes/CharacterGLBScene';
 import Preloader from './components/Preloader';
-import { useEngineState } from './context/engineContext';
+import { ThreeProvider, useSetEngine, useThreeOptional } from './context/threeContext';
 import { ModulesProvider, useModulesContext } from './context/ModulesContext';
 import { createEyeHeadTrackingService } from './latticework/eyeHeadTracking/eyeHeadTrackingService';
+import { getDefaultCharacterConfig } from './presets/annotations';
+import type { CharacterAnnotationConfig } from './camera/types';
 
 // Lazy load Chakra UI - won't be parsed/executed until animationReady is true
 const ChakraUI = lazy(() => import('./components/ChakraUI'));
-
-// Profiling
-const mark = (name: string) => performance.mark(name);
-const measure = (name: string, start: string) => {
-  try {
-    performance.measure(name, start);
-    const entries = performance.getEntriesByName(name, 'measure');
-    const last = entries[entries.length - 1];
-    if (last) console.log(`⏱️ ${name}: ${last.duration.toFixed(1)}ms`);
-  } catch {}
-};
 
 // Lazy import for toaster - only loaded when needed
 let toasterPromise: Promise<{ toaster: any }> | null = null;
@@ -29,43 +20,43 @@ const getToaster = () => {
 };
 
 function AppContent() {
-  const { engine, anim } = useEngineState();
-  const { setEyeHeadTrackingService } = useModulesContext();
+  const setEngine = useSetEngine();
+  const threeCtx = useThreeOptional();
+  const { setEyeHeadTrackingService, setCameraController } = useModulesContext();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const [animationReady, setAnimationReady] = useState(false);
 
+  // Character annotation config
+  const [annotationConfig, setAnnotationConfig] = useState<CharacterAnnotationConfig | undefined>(
+    getDefaultCharacterConfig()
+  );
+
+  // Handle character change from CharacterSection
+  const handleCharacterChange = useCallback((config: CharacterAnnotationConfig) => {
+    setIsLoading(true);
+    setLoadProgress(0);
+    setAnimationReady(false);
+    setAnnotationConfig(config);
+  }, []);
+
   const handleReady = useCallback(
-    ({ meshes, model }: {
-      meshes: any[];
-      model: any;
-    }) => {
-      mark('app-handleReady-start');
+    ({ cameraController, engine, anim }: CharacterReady) => {
+      // Pass engine and anim to context
+      setEngine(engine, anim);
 
-      mark('engine-onReady-start');
-      engine.onReady({ meshes, model });
-      mark('engine-onReady-end');
-      measure('engine.onReady()', 'engine-onReady-start');
-
-      mark('anim-play-start');
-      anim?.play?.();
-      mark('anim-play-end');
-      measure('anim.play()', 'anim-play-start');
-
+      setCameraController(cameraController);
       setIsLoading(false);
       setAnimationReady(true);
 
-      mark('app-handleReady-end');
-      measure('App handleReady total', 'app-handleReady-start');
-
       // Show toast after Chakra loads
       getToaster().then(({ toaster }) => {
-        toaster.create({ title: 'Animation Ready', type: 'success', duration: 2000 });
+        toaster.create({ title: 'Ready', type: 'success', duration: 2000 });
       });
     },
-    [engine, anim]
+    [setEngine, setCameraController]
   );
 
   const handleDrawerToggle = useCallback(() => {
@@ -74,11 +65,11 @@ function AppContent() {
 
   // Initialize eye/head tracking service when animation is ready
   useEffect(() => {
-    if (!engine || !anim || !animationReady) return;
+    if (!threeCtx?.engine || !threeCtx?.anim || !animationReady) return;
 
     const service = createEyeHeadTrackingService({
-      animationAgency: anim,
-      engine: engine,
+      animationAgency: threeCtx.anim,
+      engine: threeCtx.engine,
     });
 
     service.start();
@@ -88,17 +79,12 @@ function AppContent() {
       service.dispose();
       setEyeHeadTrackingService(null);
     };
-  }, [engine, anim, animationReady, setEyeHeadTrackingService]);
+  }, [threeCtx?.engine, threeCtx?.anim, animationReady, setEyeHeadTrackingService]);
 
-  // Camera override memoized
-  const cameraOverride = useMemo(() => ({
-    position: [1.851, 5.597, 6.365] as [number, number, number],
-    target:   [1.851, 5.597, -0.000] as [number, number, number],
-  }), []);
-
-  // Use BASE_URL for all assets to work with GitHub Pages base path
-  const glbSrc = import.meta.env.BASE_URL + "characters/jonathan_new.glb";
-  const skyboxUrl = import.meta.env.BASE_URL + "skyboxes/3BR2D07.jpg";
+  // Build GLB source from annotation config
+  const glbSrc = annotationConfig
+    ? import.meta.env.BASE_URL + annotationConfig.modelPath
+    : import.meta.env.BASE_URL + "characters/jonathan_new.glb";
 
   return (
     <div className="fullscreen-scene">
@@ -113,10 +99,9 @@ function AppContent() {
       <CharacterGLBScene
         src={glbSrc}
         className="fullscreen-scene"
-        cameraOverride={cameraOverride}
-        skyboxUrl={skyboxUrl}
         onReady={handleReady}
         onProgress={setLoadProgress}
+        annotationConfig={annotationConfig}
       />
 
       {/* Lazy load Chakra UI after animation is ready */}
@@ -125,7 +110,9 @@ function AppContent() {
           <ChakraUI
             drawerOpen={drawerOpen}
             onDrawerToggle={handleDrawerToggle}
-            animationManager={anim}
+            animationManager={threeCtx?.anim}
+            onCharacterChange={handleCharacterChange}
+            currentCharacterConfig={annotationConfig}
           />
         </Suspense>
       )}
@@ -135,8 +122,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ModulesProvider>
-      <AppContent />
-    </ModulesProvider>
+    <ThreeProvider>
+      <ModulesProvider>
+        <AppContent />
+      </ModulesProvider>
+    </ThreeProvider>
   );
 }

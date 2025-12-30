@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useMemo } from 'react';
 import type { EyeHeadTrackingService } from '../latticework/eyeHeadTracking/eyeHeadTrackingService';
+import type { AnnotationCameraController } from '../camera';
 
 interface ModulesContextType {
   isTalking: boolean;
@@ -12,6 +13,8 @@ interface ModulesContextType {
   setSpeakingText: (value: string | null) => void;
   eyeHeadTrackingService: EyeHeadTrackingService | null;
   setEyeHeadTrackingService: (service: EyeHeadTrackingService | null) => void;
+  cameraController: AnnotationCameraController | null;
+  setCameraController: (controller: AnnotationCameraController | null) => void;
 }
 
 const ModulesContext = createContext<ModulesContextType | null>(null);
@@ -30,6 +33,7 @@ export const ModulesProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [transcribedText, setTranscribedText] = useState<string | null>(null);
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [eyeHeadTrackingService, setEyeHeadTrackingService] = useState<EyeHeadTrackingService | null>(null);
+  const [cameraController, setCameraController] = useState<AnnotationCameraController | null>(null);
 
   const value = useMemo<ModulesContextType>(() => ({
     isTalking,
@@ -42,7 +46,9 @@ export const ModulesProvider: React.FC<{ children: ReactNode }> = ({ children })
     setSpeakingText,
     eyeHeadTrackingService,
     setEyeHeadTrackingService,
-  }), [isTalking, isListening, transcribedText, speakingText, eyeHeadTrackingService]);
+    cameraController,
+    setCameraController,
+  }), [isTalking, isListening, transcribedText, speakingText, eyeHeadTrackingService, cameraController]);
 
   return (
     <ModulesContext.Provider value={value}>
