@@ -145,11 +145,17 @@ export default function CharacterGLBScene({
           box.getSize(size);
           box.getCenter(center);
 
+          console.log('📦 [example] Model bounding box size:', size.x.toFixed(2), size.y.toFixed(2), size.z.toFixed(2));
+          console.log('📦 [example] Model center:', center.x.toFixed(2), center.y.toFixed(2), center.z.toFixed(2));
+
           model.position.sub(center);
 
           const maxDim = Math.max(size.x, size.y, size.z) || 1;
           const scale = 1.6 / maxDim;
+          console.log('📦 [example] Scaling model by:', scale.toFixed(4), '(maxDim was:', maxDim.toFixed(2), ')');
           model.scale.setScalar(scale);
+
+          console.log('📷 [example] Camera position:', camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
           mark('model-process-end');
           measure('Model processing', 'model-process-start', 'model-process-end');
 
