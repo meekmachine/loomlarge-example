@@ -9,6 +9,7 @@ export const JONATHAN_ANNOTATIONS: CharacterAnnotationConfig = {
   characterName: 'Jonathan',
   modelPath: 'characters/jonathan_new.glb',
   defaultAnnotation: 'full_body',
+  markerStyle: 'html', // Simple numbered dots directly over targets
   annotations: [
     {
       name: 'full_body',
@@ -104,6 +105,7 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
   characterName: 'Betta Fish',
   modelPath: 'characters/betta/scene.gltf',
   defaultAnnotation: 'full_body',
+  markerStyle: '3d', // 3D markers with lines and labels
   annotations: [
     {
       name: 'full_body',

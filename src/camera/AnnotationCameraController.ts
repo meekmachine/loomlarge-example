@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CameraDOMControls } from './DOMControls';
 import { Annotation3DMarkers } from './Annotation3DMarkers';
+import { AnnotationHTMLMarkers } from './AnnotationHTMLMarkers';
 import type {
   AnnotationCameraControllerConfig,
   CharacterAnnotationConfig,
@@ -9,7 +10,19 @@ import type {
   CameraState,
   FocusPosition,
   AnnotationChangeCallback,
+  MarkerStyle,
 } from './types';
+
+/** Common interface for marker implementations */
+interface AnnotationMarkers {
+  setModel(model: THREE.Object3D): void;
+  loadAnnotations(config: CharacterAnnotationConfig): void;
+  setCurrentAnnotation(name: string | null): void;
+  update(): void;
+  setVisible(visible: boolean): void;
+  clear(): void;
+  dispose(): void;
+}
 
 /**
  * Default configuration values
@@ -74,8 +87,9 @@ export class AnnotationCameraController {
   // DOM Controls
   private domControls: CameraDOMControls | null = null;
 
-  // 3D Markers
-  private markers: Annotation3DMarkers | null = null;
+  // Markers (can be 3D or HTML style)
+  private markers: AnnotationMarkers | null = null;
+  private currentMarkerStyle: MarkerStyle = '3d';
   private domElement: HTMLElement;
 
   // Callbacks
@@ -122,13 +136,8 @@ export class AnnotationCameraController {
       this.initDOMControls();
     }
 
-    // Initialize 3D markers
-    this.markers = new Annotation3DMarkers({
-      scene: this.scene,
-      camera: this.camera,
-      domElement: this.domElement,
-      onSelect: (name: string) => this.focusAnnotation(name),
-    });
+    // Markers will be initialized when loadAnnotations is called
+    // based on the character's markerStyle preference
   }
 
   // ====== CORE PUBLIC METHODS ======
@@ -164,8 +173,41 @@ export class AnnotationCameraController {
     this.annotations = config.annotations;
     this.updateDOMControls();
 
-    // Load markers
-    this.markers?.loadAnnotations(config);
+    // Determine marker style (default to '3d' if not specified)
+    const markerStyle = config.markerStyle ?? '3d';
+
+    // If marker style changed or markers don't exist, recreate them
+    if (this.currentMarkerStyle !== markerStyle || !this.markers) {
+      // Dispose existing markers
+      this.markers?.dispose();
+
+      // Create appropriate marker type
+      if (markerStyle === 'html') {
+        this.markers = new AnnotationHTMLMarkers({
+          scene: this.scene,
+          camera: this.camera,
+          domElement: this.domElement,
+          onSelect: (name: string) => this.focusAnnotation(name),
+        });
+      } else {
+        this.markers = new Annotation3DMarkers({
+          scene: this.scene,
+          camera: this.camera,
+          domElement: this.domElement,
+          onSelect: (name: string) => this.focusAnnotation(name),
+        });
+      }
+
+      this.currentMarkerStyle = markerStyle;
+
+      // Set model if already available
+      if (this.model) {
+        this.markers.setModel(this.model);
+      }
+    }
+
+    // Load annotations into markers
+    this.markers.loadAnnotations(config);
 
     // Focus default annotation if specified (immediate, no animation)
     if (config.defaultAnnotation) {

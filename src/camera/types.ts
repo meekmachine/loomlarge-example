@@ -28,6 +28,13 @@ export interface Annotation {
 }
 
 /**
+ * Marker style for annotation visualization
+ * - 'html': Simple HTML overlay markers with numbered dots directly over targets
+ * - '3d': 3D markers with lines and labels rendered in scene space
+ */
+export type MarkerStyle = 'html' | '3d';
+
+/**
  * Per-character annotation configuration
  */
 export interface CharacterAnnotationConfig {
@@ -41,6 +48,8 @@ export interface CharacterAnnotationConfig {
   defaultAnnotation?: string;
   /** List of available annotations */
   annotations: Annotation[];
+  /** Marker visualization style. Default: '3d' */
+  markerStyle?: MarkerStyle;
 }
 
 /**
