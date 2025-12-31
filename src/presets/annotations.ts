@@ -72,11 +72,13 @@ export const JONATHAN_ANNOTATIONS: CharacterAnnotationConfig = {
       name: 'left_foot',
       bones: ['CC_Base_L_Foot', 'CC_Base_L_ToeBase'],
       paddingFactor: 2.5,
+      cameraAngle: 270, // View from left side
     },
     {
       name: 'right_foot',
       bones: ['CC_Base_R_Foot', 'CC_Base_R_ToeBase'],
       paddingFactor: 2.5,
+      cameraAngle: 90, // View from right side
     },
   ],
 };

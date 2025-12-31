@@ -170,7 +170,8 @@ export class AnnotationMarkers {
         }
       }
 
-      // Find meshes
+      // Find meshes - Note: For skinned meshes, prefer also specifying bones
+      // for accurate marker positioning since mesh world position may be at origin
       if (annotation.meshes) {
         for (const meshName of annotation.meshes) {
           this.model.traverse((obj) => {
@@ -187,6 +188,24 @@ export class AnnotationMarkers {
 
     const center = new THREE.Vector3();
     box.getCenter(center);
+
+    // If annotation has a cameraAngle, offset the marker position to that side of the model
+    // This makes markers appear on the appropriate surface (e.g., back marker on the back)
+    if (annotation.cameraAngle !== undefined && annotation.cameraAngle !== 0) {
+      // Get the model's bounding box to determine offset distance
+      const modelBox = new THREE.Box3().setFromObject(this.model);
+      const modelSize = new THREE.Vector3();
+      modelBox.getSize(modelSize);
+
+      // Use half the depth (z-axis) as the offset distance
+      const offsetDistance = modelSize.z * 0.5;
+
+      // Calculate offset direction based on camera angle
+      const angleRad = (annotation.cameraAngle * Math.PI) / 180;
+      center.x += Math.sin(angleRad) * offsetDistance;
+      center.z -= Math.cos(angleRad) * offsetDistance;
+    }
+
     return center;
   }
 
@@ -222,6 +241,18 @@ export class AnnotationMarkers {
 
     const rect = this.domElement.getBoundingClientRect();
 
+    // Calculate camera's viewing angle around the model (in degrees)
+    // This tells us if we're looking from front (0°), back (180°), etc.
+    const modelCenter = new THREE.Vector3();
+    new THREE.Box3().setFromObject(this.model).getCenter(modelCenter);
+    const cameraDir = new THREE.Vector3().subVectors(this.camera.position, modelCenter);
+    const cameraAngle = Math.atan2(cameraDir.x, cameraDir.z) * (180 / Math.PI);
+    // Normalize to 0-360
+    const normalizedCameraAngle = ((cameraAngle % 360) + 360) % 360;
+
+    // First pass: calculate positions and visibility
+    const visibleLabels: Array<{ name: string; label: HTMLDivElement; x: number; y: number }> = [];
+
     for (const [name, label] of this.labels) {
       const position = (label as any).__position as THREE.Vector3;
       if (!position) continue;
@@ -244,12 +275,84 @@ export class AnnotationMarkers {
         continue;
       }
 
+      // For markers with a cameraAngle, only show when camera is viewing from approximately that angle
+      // This ensures "back" marker only shows when viewing from behind
+      if (annotation?.cameraAngle !== undefined && annotation.cameraAngle !== 0) {
+        const markerAngle = annotation.cameraAngle;
+        // Calculate angle difference (accounting for wrap-around at 360°)
+        let angleDiff = Math.abs(normalizedCameraAngle - markerAngle);
+        if (angleDiff > 180) angleDiff = 360 - angleDiff;
+
+        // Hide marker if camera is not within ~90° of the marker's intended viewing angle
+        if (angleDiff > 90) {
+          label.style.display = 'none';
+          continue;
+        }
+      }
+
       label.style.display = 'flex';
 
       // Convert to CSS coordinates
       const x = (screenPos.x * 0.5 + 0.5) * rect.width;
       const y = (-screenPos.y * 0.5 + 0.5) * rect.height;
 
+      visibleLabels.push({ name, label, x, y });
+    }
+
+    // Second pass: spread overlapping labels vertically and horizontally
+    const labelHeight = 24; // Approximate label height
+    const labelWidth = 80;  // Approximate label width
+    const minVerticalGap = 8;
+    const minHorizontalGap = 10;
+
+    // Sort by Y position (top to bottom) then by X (left to right)
+    visibleLabels.sort((a, b) => a.y - b.y || a.x - b.x);
+
+    // Check for overlaps and spread labels apart
+    for (let i = 0; i < visibleLabels.length; i++) {
+      for (let j = i + 1; j < visibleLabels.length; j++) {
+        const a = visibleLabels[i];
+        const b = visibleLabels[j];
+
+        const dx = Math.abs(a.x - b.x);
+        const dy = Math.abs(a.y - b.y);
+
+        // Check if labels overlap (within bounding box)
+        if (dx < labelWidth && dy < labelHeight + minVerticalGap) {
+          // Labels overlap - spread them apart
+          const overlapY = (labelHeight + minVerticalGap) - dy;
+          const overlapX = (labelWidth + minHorizontalGap) - dx;
+
+          // Prefer vertical spreading, but also spread horizontally if needed
+          if (overlapY > 0) {
+            // Spread vertically: move upper label up, lower label down
+            const spreadY = overlapY / 2 + minVerticalGap;
+            if (a.y < b.y) {
+              a.y -= spreadY;
+              b.y += spreadY;
+            } else {
+              a.y += spreadY;
+              b.y -= spreadY;
+            }
+          }
+
+          // If still horizontally close, also spread horizontally
+          if (dx < labelWidth * 0.5 && overlapX > 0) {
+            const spreadX = overlapX / 2 + minHorizontalGap;
+            if (a.x < b.x) {
+              a.x -= spreadX * 0.3;
+              b.x += spreadX * 0.3;
+            } else {
+              a.x += spreadX * 0.3;
+              b.x -= spreadX * 0.3;
+            }
+          }
+        }
+      }
+    }
+
+    // Apply final positions
+    for (const { label, x, y } of visibleLabels) {
       label.style.left = `${x}px`;
       label.style.top = `${y}px`;
     }

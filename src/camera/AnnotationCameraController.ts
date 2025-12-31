@@ -795,25 +795,32 @@ export class AnnotationCameraController {
       if (deltaTheta > Math.PI) deltaTheta -= 2 * Math.PI;
       if (deltaTheta < -Math.PI) deltaTheta += 2 * Math.PI;
 
-      // Calculate pullback amount based on BOTH rotation AND target movement
-      // This ensures smooth arcs even when moving between close targets (like eyes)
+      // Calculate pullback amount based on rotation, target movement, AND zoom change
+      // This ensures smooth arcs for ALL transitions, even between similar zoom levels
       const rotationMagnitude = Math.abs(deltaTheta) / Math.PI; // 0 to 1 (0 = no rotation, 1 = 180°)
 
-      // Also consider how far the target moves - important for eye-to-eye transitions
+      // Consider how far the target moves - important for eye-to-eye transitions
       const targetMovement = startTarget.distanceTo(targetLookAt);
       const maxRadius = Math.max(startSpherical.radius, endSpherical.radius);
-      // Normalize target movement relative to camera distance
-      const movementMagnitude = Math.min(targetMovement / maxRadius, 1);
+      // Normalize target movement relative to camera distance, with higher sensitivity
+      const movementMagnitude = Math.min(targetMovement / (maxRadius * 0.3), 1);
 
-      // Combined magnitude: use the larger of rotation or movement
-      // This ensures we pull back when either the camera rotates OR the target moves significantly
-      const combinedMagnitude = Math.max(rotationMagnitude, movementMagnitude * 0.8);
+      // Consider zoom/radius change
+      const radiusChange = Math.abs(endSpherical.radius - startSpherical.radius);
+      const zoomMagnitude = Math.min(radiusChange / maxRadius, 1);
+
+      // Combined magnitude: take the maximum effect, with a minimum baseline
+      // This ensures we ALWAYS have some pullback arc, even for small movements
+      const baseMagnitude = Math.max(rotationMagnitude, movementMagnitude, zoomMagnitude * 0.5);
+      // Ensure minimum pullback of 0.3 for any animation (graceful arc)
+      const combinedMagnitude = Math.max(baseMagnitude, 0.3);
 
       // Pull back proportionally: more movement/rotation = bigger arc
-      const pullbackFactor = 1 + combinedMagnitude * 1.5;
+      // Increased multiplier (2.0) for more dramatic pullback
+      const pullbackFactor = 1 + combinedMagnitude * 2.0;
       const arcRadius = maxRadius * pullbackFactor;
 
-      console.log(`[Camera] Animation: deltaTheta=${(deltaTheta * 180 / Math.PI).toFixed(1)}°, targetMove=${targetMovement.toFixed(3)}, combinedMag=${combinedMagnitude.toFixed(2)}, pullbackFactor=${pullbackFactor.toFixed(2)}, arcRadius=${arcRadius.toFixed(2)}`);
+      console.log(`[Camera] Animation: deltaTheta=${(deltaTheta * 180 / Math.PI).toFixed(1)}°, targetMove=${targetMovement.toFixed(3)}, rotMag=${rotationMagnitude.toFixed(2)}, moveMag=${movementMagnitude.toFixed(2)}, combinedMag=${combinedMagnitude.toFixed(2)}, pullback=${pullbackFactor.toFixed(2)}`);
 
       this.isAnimating = true;
 
@@ -836,8 +843,8 @@ export class AnnotationCameraController {
         // sin(π * t) peaks at t=0.5, giving us the arc shape
         const arcInfluence = Math.sin(Math.PI * t);
         const baseRadius = startSpherical.radius + (endSpherical.radius - startSpherical.radius) * ease;
-        // Blend between direct path and arc path based on combined magnitude (rotation + movement)
-        const pullbackAmount = (arcRadius - baseRadius) * arcInfluence * combinedMagnitude;
+        // Always apply the full pullback arc - this creates the "zoom out and back in" effect
+        const pullbackAmount = (arcRadius - baseRadius) * arcInfluence;
         const currentRadius = baseRadius + pullbackAmount;
 
         // Interpolate spherical coordinates for orbital motion
