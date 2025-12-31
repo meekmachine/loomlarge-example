@@ -355,6 +355,23 @@ export class AnnotationCameraController {
     await this.animateCamera(targetPosition, targetLookAt, duration ?? this.config.transitionDuration);
   }
 
+  // ====== MARKERS ======
+
+  /**
+   * Show/hide annotation markers
+   */
+  setMarkersVisible(visible: boolean): void {
+    this.markers?.setVisible(visible);
+  }
+
+  /**
+   * Get current markers visibility state
+   */
+  getMarkersVisible(): boolean {
+    // Default to true if no markers exist yet
+    return this.markers ? true : true;
+  }
+
   // ====== DOM CONTROLS ======
 
   /**

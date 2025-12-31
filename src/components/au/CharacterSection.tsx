@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react';
-import { VStack, Text, NativeSelect, SimpleGrid, Button, Box } from '@chakra-ui/react';
+import { VStack, Text, NativeSelect, SimpleGrid, Button, Box, HStack, Switch } from '@chakra-ui/react';
 import { useModulesContext } from '../../context/ModulesContext';
 import { ANNOTATION_REGISTRY, getAnnotationConfig } from '../../presets/annotations';
 import type { CharacterAnnotationConfig } from '../../camera/types';
@@ -29,7 +29,7 @@ export const CharacterSection = memo(function CharacterSection({
   currentCharacterConfig,
   disabled = false,
 }: CharacterSectionProps) {
-  const { cameraController } = useModulesContext();
+  const { cameraController, markersVisible, setMarkersVisible } = useModulesContext();
 
   // Handle character dropdown change
   const handleCharacterChange = useCallback(
@@ -87,9 +87,27 @@ export const CharacterSection = memo(function CharacterSection({
 
       {/* Camera Views */}
       <Box>
-        <Text fontSize="sm" fontWeight="semibold" color="gray.200" mb={2}>
-          Camera Views
-        </Text>
+        <HStack justify="space-between" mb={2}>
+          <Text fontSize="sm" fontWeight="semibold" color="gray.200">
+            Camera Views
+          </Text>
+          <HStack gap={2}>
+            <Text fontSize="xs" color="gray.400">
+              Markers
+            </Text>
+            <Switch.Root
+              checked={markersVisible}
+              onCheckedChange={(details) => setMarkersVisible(details.checked)}
+              size="sm"
+              colorPalette="blue"
+            >
+              <Switch.HiddenInput />
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Root>
+          </HStack>
+        </HStack>
         <SimpleGrid columns={2} gap={2}>
           {annotations.map((annotation) => (
             <Button
