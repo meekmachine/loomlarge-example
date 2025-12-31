@@ -97,8 +97,8 @@ export const JONATHAN_ANNOTATIONS: CharacterAnnotationConfig = {
  * - Bone010 = PECTORAL_R_ROOT (right pectoral fin)
  * - Bone018/019 = VENTRAL fins (bottom fins)
  * - Bone020+ = TAIL fins
- * - Bone046/048/050 = THROAT_L (left branchiostegal)
- * - Bone047/049/051 = GILL_R (right operculum)
+ * - Bone046/048/050 = GILL_L (left operculum/branchiostegal)
+ * - Bone047/049/051 = GILL_R (right operculum/branchiostegal)
  */
 export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
   characterId: 'betta',
@@ -119,13 +119,13 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
     },
     {
       name: 'left_eye',
-      bones: ['Bone001_Armature'], // Head bone, viewed from left side
+      meshes: ['EYES_0'], // Eye mesh - marker will be placed on left side
       paddingFactor: 1.4,
       cameraAngle: 270, // View from left side to see left eye
     },
     {
       name: 'right_eye',
-      bones: ['Bone001_Armature'], // Head bone, viewed from right side
+      meshes: ['EYES_0'], // Eye mesh - marker will be placed on right side
       paddingFactor: 1.4,
       cameraAngle: 90, // View from right side to see right eye
     },
@@ -175,12 +175,27 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
       paddingFactor: 1.6,
     },
     {
+      name: 'gill_left',
+      bones: ['Bone046_Armature', 'Bone048_Armature', 'Bone050_Armature'],
+      paddingFactor: 1.4,
+      cameraAngle: 270, // View from left side to see left gill
+    },
+    {
+      name: 'gill_right',
+      bones: ['Bone047_Armature', 'Bone049_Armature', 'Bone051_Armature'],
+      paddingFactor: 1.4,
+      cameraAngle: 90, // View from right side to see right gill
+    },
+    {
       name: 'gills',
+      // Both gills - camera will show front view
       bones: [
         'Bone046_Armature',
         'Bone047_Armature',
+        'Bone048_Armature',
+        'Bone049_Armature',
       ],
-      paddingFactor: 1.4,
+      paddingFactor: 1.6,
     },
   ],
 };
