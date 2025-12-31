@@ -29,7 +29,8 @@ const REFERENCE_MODEL_HEIGHT = 1.8;
 // Zoom threshold for scaling markers (relative to model height)
 // When camera is closer than this ratio of model height, markers shrink
 const ZOOM_THRESHOLD_RATIO = 0.8;
-const ZOOMED_IN_SCALE = 0.5; // Scale factor when zoomed in past threshold
+const ZOOMED_IN_SCALE = 0.7; // Scale factor for spheres when zoomed in
+const ZOOMED_IN_LABEL_SCALE = 0.85; // Labels stay readable - only slightly smaller
 const ZOOMED_IN_LINE_SCALE = 0.3; // Lines get much shorter when zoomed in
 
 /**
@@ -520,8 +521,9 @@ export class Annotation3DMarkers {
   }
 
   private updateMarkerStyles(): void {
-    // Get current zoom scale factor
-    const zoomScale = this.isZoomedIn ? ZOOMED_IN_SCALE : 1.0;
+    // Get current zoom scale factors
+    const sphereScale = this.isZoomedIn ? ZOOMED_IN_SCALE : 1.0;
+    const labelScale = this.isZoomedIn ? ZOOMED_IN_LABEL_SCALE : 1.0;
 
     for (const [name, sphere] of this.markerMeshes) {
       const line = this.lineMeshes.get(name);
@@ -533,19 +535,19 @@ export class Annotation3DMarkers {
         isSelected ? 0x63b3ed : this.config.markerColor
       );
       // Apply zoom scale with selection highlight
-      sphere.scale.setScalar((isSelected ? 1.3 : 1) * zoomScale);
+      sphere.scale.setScalar((isSelected ? 1.3 : 1) * sphereScale);
 
       if (line) {
         (line.material as THREE.LineBasicMaterial).color.setHex(
           isSelected ? 0x63b3ed : this.config.lineColor
         );
-        (line.material as THREE.LineBasicMaterial).opacity = isSelected ? 1 : (zoomScale < 1 ? 0.5 : 0.9);
+        (line.material as THREE.LineBasicMaterial).opacity = isSelected ? 1 : (this.isZoomedIn ? 0.6 : 0.9);
       }
 
       if (label && baseScale) {
         const s = isSelected ? 1.1 : 1;
-        // Apply zoom scale with selection highlight
-        label.scale.set(baseScale.x * s * zoomScale, baseScale.y * s * zoomScale, 1);
+        // Apply label scale with selection highlight (labels stay more readable)
+        label.scale.set(baseScale.x * s * labelScale, baseScale.y * s * labelScale, 1);
       }
     }
   }
@@ -621,7 +623,9 @@ export class Annotation3DMarkers {
    * Only called when crossing the zoom threshold (not every frame).
    */
   private applyZoomScale(scaleFactor: number): void {
-    const lineScaleFactor = scaleFactor < 1 ? ZOOMED_IN_LINE_SCALE : 1.0;
+    const isZoomed = scaleFactor < 1;
+    const lineScaleFactor = isZoomed ? ZOOMED_IN_LINE_SCALE : 1.0;
+    const labelScaleFactor = isZoomed ? ZOOMED_IN_LABEL_SCALE : 1.0;
 
     // Scale marker spheres
     for (const sphere of this.markerMeshes.values()) {
@@ -634,7 +638,7 @@ export class Annotation3DMarkers {
       if (endpoints) {
         const material = line.material as THREE.LineBasicMaterial;
         // Make lines more transparent when zoomed in
-        material.opacity = scaleFactor < 1 ? 0.6 : 0.9;
+        material.opacity = isZoomed ? 0.6 : 0.9;
 
         // Calculate new end point based on line scale
         const lineLength = endpoints.start.distanceTo(endpoints.end);
@@ -656,13 +660,13 @@ export class Annotation3DMarkers {
       }
     }
 
-    // Scale labels using their stored base scales
+    // Scale labels using their stored base scales (labels stay more readable)
     for (const [name, label] of this.labelSprites) {
       const baseScale = this.labelScales.get(name);
       if (baseScale) {
         label.scale.set(
-          baseScale.x * scaleFactor,
-          baseScale.y * scaleFactor,
+          baseScale.x * labelScaleFactor,
+          baseScale.y * labelScaleFactor,
           1
         );
       }
