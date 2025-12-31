@@ -26,6 +26,11 @@ const DEFAULT_CONFIG: Required<MarkerConfig> = {
 // Reference model height for scaling (human character is ~1.8 units tall)
 const REFERENCE_MODEL_HEIGHT = 1.8;
 
+// Zoom threshold for scaling markers (relative to model height)
+// When camera is closer than this ratio of model height, markers shrink
+const ZOOM_THRESHOLD_RATIO = 0.8;
+const ZOOMED_IN_SCALE = 0.5; // Scale factor when zoomed in past threshold
+
 /**
  * Pure 3D visual markers for annotations.
  *
@@ -53,6 +58,11 @@ export class Annotation3DMarkers {
   private modelCenter = new THREE.Vector3();
   private modelSize = new THREE.Vector3();
 
+  // Zoom-based scaling state (only updates when crossing threshold)
+  private isZoomedIn = false;
+  private zoomThreshold = 1.0; // Calculated from model size
+  private lastCameraDistance = -1; // Cache to avoid unnecessary checks
+
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
 
@@ -78,10 +88,17 @@ export class Annotation3DMarkers {
 
   setModel(model: THREE.Object3D): void {
     this.model = model;
+    // Force update of world matrices before computing bounds
+    model.updateMatrixWorld(true);
     // Cache model bounds
     const box = new THREE.Box3().setFromObject(model);
     box.getCenter(this.modelCenter);
     box.getSize(this.modelSize);
+
+    // Calculate zoom threshold based on model height
+    this.zoomThreshold = this.modelSize.y * ZOOM_THRESHOLD_RATIO;
+    this.lastCameraDistance = -1; // Reset to force recalculation
+    this.isZoomedIn = false;
   }
 
   loadAnnotations(config: CharacterAnnotationConfig): void {
@@ -214,8 +231,16 @@ export class Annotation3DMarkers {
     }
 
     // Semantic direction based on annotation name
-    // Face-related annotations should point FORWARD (positive Z)
-    if (name.includes('eye') || name.includes('face') || name.includes('mouth') || name.includes('head')) {
+    // Eyes should point outward to the side (left eye goes left, right eye goes right)
+    if (name.includes('left_eye') || name.includes('left eye')) {
+      return new THREE.Vector3(-1, 0.1, 0.3).normalize(); // Left and slightly up/forward
+    }
+    if (name.includes('right_eye') || name.includes('right eye')) {
+      return new THREE.Vector3(1, 0.1, 0.3).normalize(); // Right and slightly up/forward
+    }
+
+    // Other face-related annotations should point FORWARD (positive Z)
+    if (name.includes('face') || name.includes('mouth') || name.includes('head')) {
       return new THREE.Vector3(0, 0, 1);
     }
 
@@ -326,6 +351,10 @@ export class Annotation3DMarkers {
   private getAnnotationCenterAndBox(annotation: Annotation): { center: THREE.Vector3; box: THREE.Box3 } | null {
     if (!this.model) return null;
 
+    // CRITICAL: Force update of all world matrices including skeleton bones
+    // Without this, bone.getWorldPosition() may return stale/origin values
+    this.model.updateMatrixWorld(true);
+
     const box = new THREE.Box3();
     let found = false;
     const foundItems: string[] = [];
@@ -370,13 +399,24 @@ export class Annotation3DMarkers {
               // If center is near origin, this is likely a skinned mesh
               // Try to find the bone that controls it by name pattern
               if (meshCenter.length() < 0.1) {
-                // For CC_Base_Eye and CC_Base_Eye_1, use the eye bones
-                if (meshName.includes('Eye')) {
+                // For CC_Base_Eye and CC_Base_Eye_1, use the eye bones (CC4/human)
+                if (meshName.includes('CC_Base_Eye')) {
                   const isLeft = !meshName.includes('_1'); // CC_Base_Eye is left, CC_Base_Eye_1 is right
                   const eyeBoneName = isLeft ? 'CC_Base_L_Eye' : 'CC_Base_R_Eye';
                   this.model.traverse((boneObj) => {
                     if (boneObj.name === eyeBoneName) {
                       boneObj.getWorldPosition(meshCenter);
+                    }
+                  });
+                } else if (meshName === 'EYES_0') {
+                  // Fish eye mesh - use head bone (Bone001_Armature) and offset forward
+                  // The fish model is small and the head bone is deep inside the body,
+                  // so we need a significant forward offset to reach the visible eye surface
+                  this.model.traverse((boneObj) => {
+                    if (boneObj.name === 'Bone001_Armature') {
+                      boneObj.getWorldPosition(meshCenter);
+                      // Offset forward toward the face where eyes are visible
+                      meshCenter.z += 0.12; // Forward offset to reach eye surface
                     }
                   });
                 } else if (meshName.includes('Tongue') || meshName.includes('Teeth')) {
@@ -463,7 +503,7 @@ export class Annotation3DMarkers {
 
     // With sizeAttenuation: false, sprite scale is in normalized device coordinates (screen space)
     // Use a fixed screen-relative scale so labels appear same size regardless of model/camera distance
-    const baseScale = 0.025; // Fixed screen-relative size
+    const baseScale = 0.024; // Fixed screen-relative size
     const aspect = canvas.width / canvas.height;
     sprite.scale.set(baseScale * aspect, baseScale, 1);
 
@@ -471,27 +511,32 @@ export class Annotation3DMarkers {
   }
 
   private updateMarkerStyles(): void {
+    // Get current zoom scale factor
+    const zoomScale = this.isZoomedIn ? ZOOMED_IN_SCALE : 1.0;
+
     for (const [name, sphere] of this.markerMeshes) {
       const line = this.lineMeshes.get(name);
       const label = this.labelSprites.get(name);
-      const scale = this.labelScales.get(name);
+      const baseScale = this.labelScales.get(name);
       const isSelected = name === this.currentAnnotation;
 
       (sphere.material as THREE.MeshBasicMaterial).color.setHex(
         isSelected ? 0x63b3ed : this.config.markerColor
       );
-      sphere.scale.setScalar(isSelected ? 1.3 : 1);
+      // Apply zoom scale with selection highlight
+      sphere.scale.setScalar((isSelected ? 1.3 : 1) * zoomScale);
 
       if (line) {
         (line.material as THREE.LineBasicMaterial).color.setHex(
           isSelected ? 0x63b3ed : this.config.lineColor
         );
-        (line.material as THREE.LineBasicMaterial).opacity = isSelected ? 1 : 0.9;
+        (line.material as THREE.LineBasicMaterial).opacity = isSelected ? 1 : (zoomScale < 1 ? 0.5 : 0.9);
       }
 
-      if (label && scale) {
+      if (label && baseScale) {
         const s = isSelected ? 1.1 : 1;
-        label.scale.set(scale.x * s, scale.y * s, 1);
+        // Apply zoom scale with selection highlight
+        label.scale.set(baseScale.x * s * zoomScale, baseScale.y * s * zoomScale, 1);
       }
     }
   }
@@ -512,15 +557,38 @@ export class Annotation3DMarkers {
   };
 
   /**
-   * Per-frame update: only visibility based on camera angle.
+   * Per-frame update: visibility based on camera angle + zoom-based scaling.
+   * Scaling only updates when crossing the zoom threshold (not every frame).
    */
   update(): void {
     if (!this.model) return;
 
     const dx = this.camera.position.x - this.modelCenter.x;
+    const dy = this.camera.position.y - this.modelCenter.y;
     const dz = this.camera.position.z - this.modelCenter.z;
+
+    // Camera angle for visibility
     const cameraAngle = ((Math.atan2(dx, dz) * 180 / Math.PI) % 360 + 360) % 360;
 
+    // Check zoom threshold (only when distance changes significantly)
+    const cameraDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    // Only check threshold if distance changed by more than 5% (avoids micro-updates)
+    const distanceChanged = this.lastCameraDistance < 0 ||
+      Math.abs(cameraDistance - this.lastCameraDistance) > this.lastCameraDistance * 0.05;
+
+    if (distanceChanged) {
+      this.lastCameraDistance = cameraDistance;
+
+      // Check if we crossed the threshold
+      const shouldBeZoomedIn = cameraDistance < this.zoomThreshold;
+      if (shouldBeZoomedIn !== this.isZoomedIn) {
+        this.isZoomedIn = shouldBeZoomedIn;
+        this.applyZoomScale(shouldBeZoomedIn ? ZOOMED_IN_SCALE : 1.0);
+      }
+    }
+
+    // Visibility based on camera angle (cheap operation)
     for (const [name, sphere] of this.markerMeshes) {
       const markerAngle = sphere.userData.cameraAngle;
 
@@ -535,6 +603,37 @@ export class Annotation3DMarkers {
         const label = this.labelSprites.get(name);
         if (line) line.visible = visible;
         if (label) label.visible = visible;
+      }
+    }
+  }
+
+  /**
+   * Apply zoom-based scaling to all markers, lines, and labels.
+   * Only called when crossing the zoom threshold (not every frame).
+   */
+  private applyZoomScale(scaleFactor: number): void {
+    // Scale marker spheres
+    for (const sphere of this.markerMeshes.values()) {
+      sphere.scale.setScalar(scaleFactor);
+    }
+
+    // Scale lines (adjust geometry points)
+    // Note: Lines don't scale well with object scale, so we adjust their material instead
+    for (const line of this.lineMeshes.values()) {
+      const material = line.material as THREE.LineBasicMaterial;
+      // Make lines more transparent when zoomed in
+      material.opacity = scaleFactor < 1 ? 0.5 : 0.9;
+    }
+
+    // Scale labels using their stored base scales
+    for (const [name, label] of this.labelSprites) {
+      const baseScale = this.labelScales.get(name);
+      if (baseScale) {
+        label.scale.set(
+          baseScale.x * scaleFactor,
+          baseScale.y * scaleFactor,
+          1
+        );
       }
     }
   }
