@@ -30,6 +30,7 @@ const REFERENCE_MODEL_HEIGHT = 1.8;
 // When camera is closer than this ratio of model height, markers shrink
 const ZOOM_THRESHOLD_RATIO = 0.8;
 const ZOOMED_IN_SCALE = 0.5; // Scale factor when zoomed in past threshold
+const ZOOMED_IN_LINE_SCALE = 0.3; // Lines get much shorter when zoomed in
 
 /**
  * Pure 3D visual markers for annotations.
@@ -51,6 +52,7 @@ export class Annotation3DMarkers {
   private markerGroup: THREE.Group;
   private markerMeshes: Map<string, THREE.Mesh> = new Map();
   private lineMeshes: Map<string, THREE.Line> = new Map();
+  private lineEndpoints: Map<string, { start: THREE.Vector3; end: THREE.Vector3; direction: THREE.Vector3 }> = new Map();
   private labelSprites: Map<string, THREE.Sprite> = new Map();
   private labelScales: Map<string, { x: number; y: number }> = new Map();
 
@@ -182,6 +184,13 @@ export class Annotation3DMarkers {
     const lineEnd = surfacePoint.clone().add(
       outwardDir.clone().multiplyScalar(scaledLineLength)
     );
+
+    // Store line endpoints for zoom scaling
+    this.lineEndpoints.set(annotation.name, {
+      start: surfacePoint.clone(),
+      end: lineEnd.clone(),
+      direction: outwardDir.clone(),
+    });
 
     // Create line
     const line = new THREE.Line(
@@ -612,17 +621,39 @@ export class Annotation3DMarkers {
    * Only called when crossing the zoom threshold (not every frame).
    */
   private applyZoomScale(scaleFactor: number): void {
+    const lineScaleFactor = scaleFactor < 1 ? ZOOMED_IN_LINE_SCALE : 1.0;
+
     // Scale marker spheres
     for (const sphere of this.markerMeshes.values()) {
       sphere.scale.setScalar(scaleFactor);
     }
 
-    // Scale lines (adjust geometry points)
-    // Note: Lines don't scale well with object scale, so we adjust their material instead
-    for (const line of this.lineMeshes.values()) {
-      const material = line.material as THREE.LineBasicMaterial;
-      // Make lines more transparent when zoomed in
-      material.opacity = scaleFactor < 1 ? 0.5 : 0.9;
+    // Scale lines by updating their geometry to shorter length
+    for (const [name, line] of this.lineMeshes) {
+      const endpoints = this.lineEndpoints.get(name);
+      if (endpoints) {
+        const material = line.material as THREE.LineBasicMaterial;
+        // Make lines more transparent when zoomed in
+        material.opacity = scaleFactor < 1 ? 0.6 : 0.9;
+
+        // Calculate new end point based on line scale
+        const lineLength = endpoints.start.distanceTo(endpoints.end);
+        const newLength = lineLength * lineScaleFactor;
+        const newEnd = endpoints.start.clone().add(
+          endpoints.direction.clone().multiplyScalar(newLength)
+        );
+
+        // Update line geometry
+        const positions = line.geometry.getAttribute('position');
+        positions.setXYZ(1, newEnd.x, newEnd.y, newEnd.z);
+        positions.needsUpdate = true;
+
+        // Move label to new line end
+        const label = this.labelSprites.get(name);
+        if (label) {
+          label.position.copy(newEnd);
+        }
+      }
     }
 
     // Scale labels using their stored base scales
@@ -660,6 +691,7 @@ export class Annotation3DMarkers {
 
     this.markerMeshes.clear();
     this.lineMeshes.clear();
+    this.lineEndpoints.clear();
     this.labelSprites.clear();
     this.labelScales.clear();
   }

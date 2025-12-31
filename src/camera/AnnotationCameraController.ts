@@ -32,7 +32,7 @@ const DEFAULTS = {
   dampingFactor: 0.05,
   minDistance: 0.5,
   maxDistance: 10,
-  transitionDuration: 800,
+  transitionDuration: 1400, // Slower, more graceful camera transitions
   zoomPaddingFactor: 1.5,
   closeUpPaddingFactor: 1.2,
   fullBodyPaddingFactor: 2.0,
