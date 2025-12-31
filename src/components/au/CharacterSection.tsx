@@ -2,7 +2,7 @@ import { memo, useCallback } from 'react';
 import { VStack, Text, NativeSelect, SimpleGrid, Button, Box, HStack, Switch } from '@chakra-ui/react';
 import { useModulesContext } from '../../context/ModulesContext';
 import { ANNOTATION_REGISTRY, getAnnotationConfig } from '../../presets/annotations';
-import type { CharacterAnnotationConfig } from '../../camera/types';
+import type { CharacterAnnotationConfig, MarkerStyle } from '../../camera/types';
 
 interface CharacterSectionProps {
   onCharacterChange?: (config: CharacterAnnotationConfig) => void;
@@ -29,7 +29,7 @@ export const CharacterSection = memo(function CharacterSection({
   currentCharacterConfig,
   disabled = false,
 }: CharacterSectionProps) {
-  const { cameraController, markersVisible, setMarkersVisible } = useModulesContext();
+  const { cameraController, markersVisible, setMarkersVisible, markerStyle, setMarkerStyle } = useModulesContext();
 
   // Handle character dropdown change
   const handleCharacterChange = useCallback(
@@ -91,21 +91,39 @@ export const CharacterSection = memo(function CharacterSection({
           <Text fontSize="sm" fontWeight="semibold" color="gray.200">
             Camera Views
           </Text>
-          <HStack gap={2}>
-            <Text fontSize="xs" color="gray.400">
-              Markers
-            </Text>
-            <Switch.Root
-              checked={markersVisible}
-              onCheckedChange={(details) => setMarkersVisible(details.checked)}
-              size="sm"
-              colorPalette="blue"
-            >
-              <Switch.HiddenInput />
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-            </Switch.Root>
+          <HStack gap={4}>
+            <HStack gap={2}>
+              <Text fontSize="xs" color="gray.400">
+                Markers
+              </Text>
+              <Switch.Root
+                checked={markersVisible}
+                onCheckedChange={(details) => setMarkersVisible(details.checked)}
+                size="sm"
+                colorPalette="blue"
+              >
+                <Switch.HiddenInput />
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Root>
+            </HStack>
+            <HStack gap={2}>
+              <Text fontSize="xs" color="gray.400">
+                3D
+              </Text>
+              <Switch.Root
+                checked={markerStyle === '3d'}
+                onCheckedChange={(details) => setMarkerStyle(details.checked ? '3d' : 'html')}
+                size="sm"
+                colorPalette="purple"
+              >
+                <Switch.HiddenInput />
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Root>
+            </HStack>
           </HStack>
         </HStack>
         <SimpleGrid columns={2} gap={2}>

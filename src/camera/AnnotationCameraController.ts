@@ -372,6 +372,61 @@ export class AnnotationCameraController {
     return this.markers ? true : true;
   }
 
+  /**
+   * Get current marker style
+   */
+  getMarkerStyle(): MarkerStyle {
+    return this.currentMarkerStyle;
+  }
+
+  /**
+   * Set marker style (html or 3d) - recreates markers with new style
+   */
+  setMarkerStyle(style: MarkerStyle): void {
+    if (style === this.currentMarkerStyle) return;
+
+    // Store current visibility state
+    const wasVisible = this.markers ? true : true;
+
+    // Dispose existing markers
+    this.markers?.dispose();
+
+    // Create appropriate marker type
+    if (style === 'html') {
+      this.markers = new AnnotationHTMLMarkers({
+        scene: this.scene,
+        camera: this.camera,
+        domElement: this.domElement,
+        onSelect: (name: string) => this.focusAnnotation(name),
+      });
+    } else {
+      this.markers = new Annotation3DMarkers({
+        scene: this.scene,
+        camera: this.camera,
+        domElement: this.domElement,
+        onSelect: (name: string) => this.focusAnnotation(name),
+      });
+    }
+
+    this.currentMarkerStyle = style;
+
+    // Set model if already available
+    if (this.model) {
+      this.markers.setModel(this.model);
+    }
+
+    // Reload annotations if we have a config
+    if (this.characterConfig) {
+      this.markers.loadAnnotations(this.characterConfig);
+      if (this.currentAnnotation) {
+        this.markers.setCurrentAnnotation(this.currentAnnotation);
+      }
+    }
+
+    // Restore visibility
+    this.markers.setVisible(wasVisible);
+  }
+
   // ====== DOM CONTROLS ======
 
   /**
