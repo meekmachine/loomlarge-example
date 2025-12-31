@@ -27,18 +27,18 @@ export const JONATHAN_ANNOTATIONS: CharacterAnnotationConfig = {
     },
     {
       name: 'left_eye',
-      bones: ['CC_Base_L_Eye'],
-      paddingFactor: 3.0,
+      bones: ['CC_Base_L_Eye'], // Use bone for accurate marker positioning
+      paddingFactor: 1.2,
     },
     {
       name: 'right_eye',
-      bones: ['CC_Base_R_Eye'],
-      paddingFactor: 3.0,
+      bones: ['CC_Base_R_Eye'], // Use bone for accurate marker positioning
+      paddingFactor: 1.2,
     },
     {
       name: 'mouth',
-      bones: ['CC_Base_JawRoot', 'CC_Base_Tongue01'],
-      paddingFactor: 2.0,
+      bones: ['CC_Base_JawRoot'], // Use bone only - teeth/tongue meshes are skinned and report origin
+      paddingFactor: 1.5,
     },
     {
       name: 'upper_body',
@@ -54,16 +54,19 @@ export const JONATHAN_ANNOTATIONS: CharacterAnnotationConfig = {
       name: 'back',
       bones: ['CC_Base_Spine01', 'CC_Base_Spine02'],
       paddingFactor: 1.8,
+      cameraAngle: 180,
     },
     {
       name: 'left_hand',
       bones: ['CC_Base_L_Hand'],
-      paddingFactor: 2.5,
+      paddingFactor: 1.3,
+      cameraAngle: 270, // View from left side
     },
     {
       name: 'right_hand',
       bones: ['CC_Base_R_Hand'],
-      paddingFactor: 2.5,
+      paddingFactor: 1.3,
+      cameraAngle: 90, // View from right side
     },
     {
       name: 'left_foot',
@@ -81,6 +84,18 @@ export const JONATHAN_ANNOTATIONS: CharacterAnnotationConfig = {
 /**
  * Betta Fish annotations
  * Bone names from the betta fish Sketchfab model (53 bones, skeletal animation)
+ *
+ * Bone hierarchy:
+ * - Bone001 = HEAD
+ * - Bone002/003/004 = BODY (front/mid/back)
+ * - Bone005 = TAIL_BASE
+ * - Bone006/007/008 = DORSAL FIN (top fin)
+ * - Bone009 = PECTORAL_L_ROOT (left pectoral fin)
+ * - Bone010 = PECTORAL_R_ROOT (right pectoral fin)
+ * - Bone018/019 = VENTRAL fins (bottom fins)
+ * - Bone020+ = TAIL fins
+ * - Bone046/048/050 = THROAT_L (left branchiostegal)
+ * - Bone047/049/051 = GILL_R (right operculum)
  */
 export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
   characterId: 'betta',
@@ -95,8 +110,20 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
     },
     {
       name: 'head',
-      bones: ['Bone001_Armature', 'Bone009_Armature', 'Bone010_Armature'],
-      paddingFactor: 1.5,
+      bones: ['Bone001_Armature'],
+      paddingFactor: 1.8,
+    },
+    {
+      name: 'left_eye',
+      bones: ['Bone001_Armature'], // Head bone, viewed from left side
+      paddingFactor: 1.4,
+      cameraAngle: 270, // View from left side to see left eye
+    },
+    {
+      name: 'right_eye',
+      bones: ['Bone001_Armature'], // Head bone, viewed from right side
+      paddingFactor: 1.4,
+      cameraAngle: 90, // View from right side to see right eye
     },
     {
       name: 'body',
@@ -107,9 +134,8 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
       name: 'tail',
       bones: [
         'Bone005_Armature',
-        'Bone018_Armature',
-        'Bone019_Armature',
         'Bone020_Armature',
+        'Bone039_Armature',
       ],
       paddingFactor: 1.6,
     },
@@ -119,12 +145,28 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
       paddingFactor: 1.8,
     },
     {
-      name: 'pectoral_fins',
+      name: 'pectoral_fin_left',
       bones: [
         'Bone009_Armature',
         'Bone027_Armature',
+        'Bone028_Armature',
+      ],
+      paddingFactor: 1.6,
+    },
+    {
+      name: 'pectoral_fin_right',
+      bones: [
         'Bone010_Armature',
         'Bone012_Armature',
+        'Bone011_Armature',
+      ],
+      paddingFactor: 1.6,
+    },
+    {
+      name: 'ventral_fins',
+      bones: [
+        'Bone018_Armature',
+        'Bone033_Armature',
       ],
       paddingFactor: 1.6,
     },
@@ -133,8 +175,6 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
       bones: [
         'Bone046_Armature',
         'Bone047_Armature',
-        'Bone048_Armature',
-        'Bone049_Armature',
       ],
       paddingFactor: 1.4,
     },

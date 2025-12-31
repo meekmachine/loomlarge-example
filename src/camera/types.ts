@@ -14,6 +14,11 @@ export interface Annotation {
   objects?: string[];
   /** Override default padding factor for this annotation */
   paddingFactor?: number;
+  /**
+   * Camera angle in degrees around the Y axis (horizontal orbit).
+   * 0 = front (default), 90 = right side, 180 = back, 270 = left side
+   */
+  cameraAngle?: number;
   /** Fine-tune camera position offset */
   cameraOffset?: {
     x?: number;

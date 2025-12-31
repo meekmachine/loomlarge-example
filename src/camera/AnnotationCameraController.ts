@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CameraDOMControls } from './DOMControls';
-import { AnnotationMarkers } from './AnnotationMarkers';
+import { Annotation3DMarkers } from './Annotation3DMarkers';
 import type {
   AnnotationCameraControllerConfig,
   CharacterAnnotationConfig,
@@ -75,7 +75,7 @@ export class AnnotationCameraController {
   private domControls: CameraDOMControls | null = null;
 
   // 3D Markers
-  private markers: AnnotationMarkers | null = null;
+  private markers: Annotation3DMarkers | null = null;
   private domElement: HTMLElement;
 
   // Callbacks
@@ -123,11 +123,11 @@ export class AnnotationCameraController {
     }
 
     // Initialize 3D markers
-    this.markers = new AnnotationMarkers({
+    this.markers = new Annotation3DMarkers({
       scene: this.scene,
       camera: this.camera,
       domElement: this.domElement,
-      onSelect: (name) => this.focusAnnotation(name),
+      onSelect: (name: string) => this.focusAnnotation(name),
     });
   }
 
@@ -194,7 +194,7 @@ export class AnnotationCameraController {
     this.currentAnnotation = name;
     this.notifyAnnotationChange(name);
 
-    const focusPos = this.calculateFocusPosition(objects, annotation.paddingFactor);
+    const focusPos = this.calculateFocusPosition(objects, annotation.paddingFactor, annotation.cameraAngle);
 
     // Apply camera offset if specified
     if (annotation.cameraOffset) {
@@ -454,9 +454,115 @@ export class AnnotationCameraController {
   }
 
   /**
-   * Calculate optimal camera position to frame objects
+   * Get bounding box of vertices influenced by a bone from skinned meshes
+   * This finds the actual geometry size around a bone for proper framing
+   *
+   * For skinned meshes, we need to compute the actual skinned vertex positions,
+   * not just the bind pose positions.
    */
-  private calculateFocusPosition(objects: THREE.Object3D[], overridePadding?: number): FocusPosition {
+  private getBoneInfluencedBoundingBox(bone: THREE.Bone): THREE.Box3 | null {
+    if (!this.model) return null;
+
+    const box = new THREE.Box3();
+
+    // Find the bone index in any skeleton
+    let boneIndex = -1;
+    let skeleton: THREE.Skeleton | null = null;
+
+    this.model.traverse((obj) => {
+      const mesh = obj as THREE.SkinnedMesh;
+      if (mesh.isSkinnedMesh && mesh.skeleton) {
+        const idx = mesh.skeleton.bones.indexOf(bone);
+        if (idx !== -1) {
+          boneIndex = idx;
+          skeleton = mesh.skeleton;
+        }
+      }
+    });
+
+    if (boneIndex === -1 || !skeleton) {
+      return null;
+    }
+
+    // Find all skinned meshes and collect vertices influenced by this bone
+    const tempVertex = new THREE.Vector3();
+    const skinned = new THREE.Vector3();
+    const tempMatrix = new THREE.Matrix4();
+
+    this.model.traverse((obj) => {
+      const mesh = obj as THREE.SkinnedMesh;
+      if (!mesh.isSkinnedMesh || mesh.skeleton !== skeleton) return;
+
+      // Ensure bone matrices are up to date
+      mesh.skeleton.update();
+
+      const geometry = mesh.geometry;
+      const positionAttr = geometry.getAttribute('position');
+      const skinIndexAttr = geometry.getAttribute('skinIndex');
+      const skinWeightAttr = geometry.getAttribute('skinWeight');
+
+      if (!positionAttr || !skinIndexAttr || !skinWeightAttr) return;
+
+      // Get the bind matrix inverse for skinning calculation
+      const bindMatrixInverse = mesh.bindMatrixInverse;
+
+      // Check each vertex
+      for (let i = 0; i < positionAttr.count; i++) {
+        // Check if this vertex is influenced by our bone (weight > 0.1)
+        let isInfluenced = false;
+        for (let j = 0; j < 4; j++) {
+          const skinIdx = skinIndexAttr.getComponent(i, j);
+          const weight = skinWeightAttr.getComponent(i, j);
+          if (skinIdx === boneIndex && weight > 0.1) {
+            isInfluenced = true;
+            break;
+          }
+        }
+
+        if (isInfluenced) {
+          // Get the vertex position in local space
+          tempVertex.fromBufferAttribute(positionAttr, i);
+
+          // Apply skinning transformation
+          // skinned = sum(weight_i * boneMatrix_i * bindMatrixInverse * vertex)
+          skinned.set(0, 0, 0);
+
+          for (let j = 0; j < 4; j++) {
+            const skinIdx = skinIndexAttr.getComponent(i, j);
+            const weight = skinWeightAttr.getComponent(i, j);
+
+            if (weight > 0) {
+              // Get bone matrix (already includes world transform)
+              const boneMatrix = mesh.skeleton.boneMatrices;
+              tempMatrix.fromArray(boneMatrix, skinIdx * 16);
+
+              // Transform vertex: boneMatrix * bindMatrixInverse * vertex
+              const transformed = tempVertex.clone();
+              transformed.applyMatrix4(bindMatrixInverse);
+              transformed.applyMatrix4(tempMatrix);
+              transformed.multiplyScalar(weight);
+
+              skinned.add(transformed);
+            }
+          }
+
+          // Apply mesh world matrix to get final world position
+          skinned.applyMatrix4(mesh.matrixWorld);
+          box.expandByPoint(skinned);
+        }
+      }
+    });
+
+    return box.isEmpty() ? null : box;
+  }
+
+  /**
+   * Calculate optimal camera position to frame objects
+   * @param objects - Objects to focus on
+   * @param overridePadding - Optional padding factor override
+   * @param cameraAngle - Camera angle in degrees around Y axis (0 = front, 180 = back)
+   */
+  private calculateFocusPosition(objects: THREE.Object3D[], overridePadding?: number, cameraAngle?: number): FocusPosition {
     // Force update world matrices on entire scene before computing bounding box
     this.scene.updateMatrixWorld(true);
 
@@ -466,13 +572,24 @@ export class AnnotationCameraController {
     console.log(`[Camera] Calculating focus for ${objects.length} objects:`, objects.map(o => `${o.name}(${o.type})`));
 
     for (const obj of objects) {
-      // For bones, we need to get their world position directly (bones have no geometry)
+      // For bones, find the geometry influenced by this bone from skinned meshes
       if (obj.type === 'Bone') {
+        const bone = obj as THREE.Bone;
         const worldPos = new THREE.Vector3();
-        obj.getWorldPosition(worldPos);
-        // Expand box with a small sphere around the bone position
-        box.expandByPoint(worldPos);
-        console.log(`[Camera] Bone ${obj.name} at:`, worldPos.x.toFixed(3), worldPos.y.toFixed(3), worldPos.z.toFixed(3));
+        bone.getWorldPosition(worldPos);
+
+        // Find skinned meshes and get vertices influenced by this bone
+        const boneBox = this.getBoneInfluencedBoundingBox(bone);
+        if (boneBox && !boneBox.isEmpty()) {
+          box.union(boneBox);
+          const boneSize = new THREE.Vector3();
+          boneBox.getSize(boneSize);
+          console.log(`[Camera] Bone ${obj.name} influenced geometry box: size=(${boneSize.x.toFixed(3)}, ${boneSize.y.toFixed(3)}, ${boneSize.z.toFixed(3)})`);
+        } else {
+          // Fallback: just use the bone position
+          box.expandByPoint(worldPos);
+          console.log(`[Camera] Bone ${obj.name} at:`, worldPos.x.toFixed(3), worldPos.y.toFixed(3), worldPos.z.toFixed(3));
+        }
       } else {
         // For meshes and other objects, use expandByObject
         const objBox = new THREE.Box3().setFromObject(obj);
@@ -502,6 +619,35 @@ export class AnnotationCameraController {
     console.log(`[Camera] Final box: min=(${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)}) max=(${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
     console.log(`[Camera] Center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), Size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
 
+    // Determine the effective camera angle
+    // If no explicit angle provided, calculate one based on target offset from model center
+    let effectiveAngle = cameraAngle ?? 0;
+
+    if (this.model && cameraAngle === undefined) {
+      const modelBox = new THREE.Box3().setFromObject(this.model);
+      const modelCenter = new THREE.Vector3();
+      const modelSize = new THREE.Vector3();
+      modelBox.getCenter(modelCenter);
+      modelBox.getSize(modelSize);
+
+      // Calculate horizontal offset from model center (X axis)
+      const horizontalOffset = center.x - modelCenter.x;
+      const maxSize = Math.max(size.x, size.y, size.z);
+
+      // For small/medium targets that are off-center, auto-rotate camera towards them
+      // This creates a more natural viewing angle for things like eyes
+      // Threshold: targets smaller than ~20cm that are noticeably off-center
+      if (maxSize < 0.25 && Math.abs(horizontalOffset) > 0.01) {
+        // Calculate angle based on offset - targets further to the side get more rotation
+        // Use atan to get a natural angle that points towards the target
+        // Scale factor determines how aggressively camera rotates (higher = more rotation)
+        const scaleFactor = 2.5; // Multiplier for more pronounced rotation
+        const autoAngle = Math.atan2(horizontalOffset * scaleFactor, modelSize.z / 2) * (180 / Math.PI);
+        effectiveAngle = autoAngle;
+        console.log(`[Camera] Auto-angle for off-center target: offset=${horizontalOffset.toFixed(3)}, size=${maxSize.toFixed(3)}, angle=${effectiveAngle.toFixed(1)}°`);
+      }
+    }
+
     // Get camera aspect ratio
     const aspect = this.camera.aspect;
     const fovRad = this.camera.fov * (Math.PI / 180);
@@ -519,20 +665,57 @@ export class AnnotationCameraController {
 
     // Apply padding factor
     const padding = overridePadding ?? this.getPaddingFactor(Math.max(size.x, size.y, size.z));
-    const distance = Math.max(baseDistance * padding, this.config.minDistance);
+    let distance = Math.max(baseDistance * padding, this.config.minDistance);
 
-    // Position camera directly in front of center, looking at center
-    const position = new THREE.Vector3(center.x, center.y, center.z + distance);
+    // For angled views, ensure camera doesn't end up inside the model
+    // Calculate the model's bounding box to get its full extent
+    const angleRad = (effectiveAngle * Math.PI) / 180;
+    if (this.model && effectiveAngle !== 0) {
+      const modelBox = new THREE.Box3().setFromObject(this.model);
+      const modelCenter = new THREE.Vector3();
+      const modelSize = new THREE.Vector3();
+      modelBox.getCenter(modelCenter);
+      modelBox.getSize(modelSize);
 
-    console.log(`[Camera] Framing result: position=(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}), target=(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), distance=${distance.toFixed(2)}`);
+      // Calculate the distance from target center to the edge of the model in the camera direction
+      // This ensures the camera clears the model body
+      const cosAngle = Math.abs(Math.cos(angleRad));
+      const sinAngle = Math.abs(Math.sin(angleRad));
+      // How far the model extends in the camera's approach direction
+      const modelDepthInDirection = (modelSize.z / 2) * cosAngle + (modelSize.x / 2) * sinAngle;
+
+      // Also account for offset from model center to target center
+      const targetToModelCenter = new THREE.Vector3().subVectors(modelCenter, center);
+      const offsetInCameraDir = Math.abs(targetToModelCenter.x * Math.sin(angleRad) + targetToModelCenter.z * Math.cos(angleRad));
+
+      // Minimum safe distance = model extent + offset + buffer
+      const minSafeDistance = modelDepthInDirection + offsetInCameraDir + 0.3;
+
+      console.log(`[Camera] Side view safety: modelDepth=${modelDepthInDirection.toFixed(2)}, offset=${offsetInCameraDir.toFixed(2)}, minSafe=${minSafeDistance.toFixed(2)}`);
+
+      distance = Math.max(distance, minSafeDistance * padding);
+    }
+
+    // Position camera at the specified angle around the target
+    // Default angle is 0 (front), 180 = back, 90 = right side, 270 = left side
+    const position = new THREE.Vector3(
+      center.x + Math.sin(angleRad) * distance,
+      center.y,
+      center.z + Math.cos(angleRad) * distance
+    );
+
+    console.log(`[Camera] Framing result: position=(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}), target=(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), distance=${distance.toFixed(2)}, angle=${effectiveAngle.toFixed(1)}°`);
 
     return { position, target: center, distance };
   }
 
   /**
    * Get appropriate padding factor based on target size
+   * Smaller targets get tighter framing for better detail visibility
    */
   private getPaddingFactor(size: number): number {
+    // Very small targets (individual eyes) get extra tight framing
+    if (size < 0.1) return this.config.closeUpPaddingFactor * 0.7;
     // Small targets (eyes, mouth) get tighter framing
     if (size < 0.3) return this.config.closeUpPaddingFactor;
     // Full body gets wider framing
@@ -542,7 +725,33 @@ export class AnnotationCameraController {
   }
 
   /**
+   * Convert Cartesian position to spherical coordinates relative to a center point
+   */
+  private toSpherical(position: THREE.Vector3, center: THREE.Vector3): { radius: number; theta: number; phi: number } {
+    const offset = position.clone().sub(center);
+    const radius = offset.length();
+    // theta: angle around Y axis (azimuth), phi: angle from Y axis (polar)
+    const theta = Math.atan2(offset.x, offset.z);
+    const phi = Math.acos(Math.max(-1, Math.min(1, offset.y / radius)));
+    return { radius, theta, phi };
+  }
+
+  /**
+   * Convert spherical coordinates to Cartesian position relative to a center point
+   */
+  private fromSpherical(spherical: { radius: number; theta: number; phi: number }, center: THREE.Vector3): THREE.Vector3 {
+    const { radius, theta, phi } = spherical;
+    return new THREE.Vector3(
+      center.x + radius * Math.sin(phi) * Math.sin(theta),
+      center.y + radius * Math.cos(phi),
+      center.z + radius * Math.sin(phi) * Math.cos(theta)
+    );
+  }
+
+  /**
    * Animate camera to target position with smooth easing
+   * Uses spherical interpolation to orbit around the target rather than moving in a straight line
+   * When significant rotation is needed, pulls back to a wider arc to avoid passing through the model
    */
   private animateCamera(
     targetPosition: THREE.Vector3,
@@ -576,18 +785,71 @@ export class AnnotationCameraController {
       const startTarget = this.controls.target.clone();
       const startTime = performance.now();
 
+      // Convert to spherical coordinates for smooth orbital animation
+      // Use the interpolated target as the center for spherical interpolation
+      const startSpherical = this.toSpherical(startPosition, startTarget);
+      const endSpherical = this.toSpherical(targetPosition, targetLookAt);
+
+      // Handle theta wrap-around: choose the shortest path
+      let deltaTheta = endSpherical.theta - startSpherical.theta;
+      if (deltaTheta > Math.PI) deltaTheta -= 2 * Math.PI;
+      if (deltaTheta < -Math.PI) deltaTheta += 2 * Math.PI;
+
+      // Calculate pullback amount based on BOTH rotation AND target movement
+      // This ensures smooth arcs even when moving between close targets (like eyes)
+      const rotationMagnitude = Math.abs(deltaTheta) / Math.PI; // 0 to 1 (0 = no rotation, 1 = 180°)
+
+      // Also consider how far the target moves - important for eye-to-eye transitions
+      const targetMovement = startTarget.distanceTo(targetLookAt);
+      const maxRadius = Math.max(startSpherical.radius, endSpherical.radius);
+      // Normalize target movement relative to camera distance
+      const movementMagnitude = Math.min(targetMovement / maxRadius, 1);
+
+      // Combined magnitude: use the larger of rotation or movement
+      // This ensures we pull back when either the camera rotates OR the target moves significantly
+      const combinedMagnitude = Math.max(rotationMagnitude, movementMagnitude * 0.8);
+
+      // Pull back proportionally: more movement/rotation = bigger arc
+      const pullbackFactor = 1 + combinedMagnitude * 1.5;
+      const arcRadius = maxRadius * pullbackFactor;
+
+      console.log(`[Camera] Animation: deltaTheta=${(deltaTheta * 180 / Math.PI).toFixed(1)}°, targetMove=${targetMovement.toFixed(3)}, combinedMag=${combinedMagnitude.toFixed(2)}, pullbackFactor=${pullbackFactor.toFixed(2)}, arcRadius=${arcRadius.toFixed(2)}`);
+
       this.isAnimating = true;
 
       const animate = () => {
         const elapsed = performance.now() - startTime;
         const t = Math.min(elapsed / duration, 1);
 
-        // Ease-out cubic for smooth deceleration
-        const ease = 1 - Math.pow(1 - t, 3);
+        // Ease-in-out for smooth acceleration and deceleration
+        // This feels more graceful than ease-out alone for orbital motion
+        const ease = t < 0.5
+          ? 2 * t * t
+          : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
-        // Interpolate position and target
-        this.camera.position.lerpVectors(startPosition, targetPosition, ease);
-        this.controls.target.lerpVectors(startTarget, targetLookAt, ease);
+        // Interpolate the look-at target
+        const currentTarget = new THREE.Vector3().lerpVectors(startTarget, targetLookAt, ease);
+        this.controls.target.copy(currentTarget);
+
+        // Calculate radius with pullback arc
+        // Use a sine curve to smoothly pull back in the middle of the animation
+        // sin(π * t) peaks at t=0.5, giving us the arc shape
+        const arcInfluence = Math.sin(Math.PI * t);
+        const baseRadius = startSpherical.radius + (endSpherical.radius - startSpherical.radius) * ease;
+        // Blend between direct path and arc path based on combined magnitude (rotation + movement)
+        const pullbackAmount = (arcRadius - baseRadius) * arcInfluence * combinedMagnitude;
+        const currentRadius = baseRadius + pullbackAmount;
+
+        // Interpolate spherical coordinates for orbital motion
+        const currentSpherical = {
+          radius: currentRadius,
+          theta: startSpherical.theta + deltaTheta * ease,
+          phi: startSpherical.phi + (endSpherical.phi - startSpherical.phi) * ease,
+        };
+
+        // Convert back to Cartesian and set camera position
+        const currentPosition = this.fromSpherical(currentSpherical, currentTarget);
+        this.camera.position.copy(currentPosition);
         this.controls.update();
 
         if (t < 1) {
@@ -595,7 +857,9 @@ export class AnnotationCameraController {
         } else {
           this.animationId = null;
           this.isAnimating = false;
-          // Final update - OrbitControls handles camera orientation
+          // Final update - ensure exact final position
+          this.camera.position.copy(targetPosition);
+          this.controls.target.copy(targetLookAt);
           this.controls.update();
           console.log(`[Camera] Animation complete. Camera at (${this.camera.position.x.toFixed(3)}, ${this.camera.position.y.toFixed(3)}, ${this.camera.position.z.toFixed(3)}), controls.target=(${this.controls.target.x.toFixed(3)}, ${this.controls.target.y.toFixed(3)}, ${this.controls.target.z.toFixed(3)})`);
           resolve();
