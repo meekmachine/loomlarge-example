@@ -29,7 +29,7 @@ const REFERENCE_MODEL_HEIGHT = 1.8;
 // Zoom threshold for scaling markers (relative to model height)
 // When camera is closer than this ratio of model height, markers shrink
 const ZOOM_THRESHOLD_RATIO = 0.8;
-const ZOOMED_IN_SCALE = 0.7; // Scale factor for spheres when zoomed in
+const ZOOMED_IN_SPHERE_SCALE = 0.25; // Spheres get much smaller (25%) when zoomed in
 const ZOOMED_IN_LABEL_SCALE = 0.85; // Labels stay readable - only slightly smaller
 const ZOOMED_IN_LINE_SCALE = 0.3; // Lines get much shorter when zoomed in
 
@@ -522,7 +522,7 @@ export class Annotation3DMarkers {
 
   private updateMarkerStyles(): void {
     // Get current zoom scale factors
-    const sphereScale = this.isZoomedIn ? ZOOMED_IN_SCALE : 1.0;
+    const sphereScale = this.isZoomedIn ? ZOOMED_IN_SPHERE_SCALE : 1.0;
     const labelScale = this.isZoomedIn ? ZOOMED_IN_LABEL_SCALE : 1.0;
 
     for (const [name, sphere] of this.markerMeshes) {
@@ -595,7 +595,7 @@ export class Annotation3DMarkers {
       const shouldBeZoomedIn = cameraDistance < this.zoomThreshold;
       if (shouldBeZoomedIn !== this.isZoomedIn) {
         this.isZoomedIn = shouldBeZoomedIn;
-        this.applyZoomScale(shouldBeZoomedIn ? ZOOMED_IN_SCALE : 1.0);
+        this.applyZoomScale(shouldBeZoomedIn ? ZOOMED_IN_SPHERE_SCALE : 1.0);
       }
     }
 
@@ -624,12 +624,13 @@ export class Annotation3DMarkers {
    */
   private applyZoomScale(scaleFactor: number): void {
     const isZoomed = scaleFactor < 1;
+    const sphereScaleFactor = isZoomed ? ZOOMED_IN_SPHERE_SCALE : 1.0;
     const lineScaleFactor = isZoomed ? ZOOMED_IN_LINE_SCALE : 1.0;
     const labelScaleFactor = isZoomed ? ZOOMED_IN_LABEL_SCALE : 1.0;
 
-    // Scale marker spheres
+    // Scale marker spheres (much smaller when zoomed in)
     for (const sphere of this.markerMeshes.values()) {
-      sphere.scale.setScalar(scaleFactor);
+      sphere.scale.setScalar(sphereScaleFactor);
     }
 
     // Scale lines by updating their geometry to shorter length
