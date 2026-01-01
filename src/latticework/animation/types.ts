@@ -1,9 +1,27 @@
 // Unified types for the Animation Agency (Machine + Service + Scheduler)
 
-import type { TransitionHandle, ClipHandle, ClipOptions } from 'loomlarge';
+import type { TransitionHandle } from 'loomlarge';
 
-// Re-export types from loomlarge for convenience
-export type { CurvePoint as LoomCurvePoint, CurvesMap as LoomCurvesMap } from 'loomlarge';
+// Local types for clip-based playback (not yet in loomlarge)
+export interface ClipOptions {
+  loop?: boolean;
+  playbackRate?: number;
+  balance?: number;
+  jawScale?: number;
+  intensityScale?: number;
+}
+
+export interface ClipHandle {
+  clipName: string;
+  play(): void;
+  stop(): void;
+  pause(): void;
+  resume(): void;
+  getTime(): number;
+  getDuration(): number;
+  finished: Promise<void>;
+}
+
 
 /**
  * Host capabilities interface - what the engine must provide to the animation service.
