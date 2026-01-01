@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoomLargeThree, CC4_PRESET } from 'loomlarge';
-import { FISH_AU_MAPPING_CONFIG } from '../presets/bettaFish';
+import { AU_MAPPING_CONFIG } from '../presets/bettaFish';
 import { AnnotationCameraController } from '../camera';
 import { createAnimationService, type AnimationService } from '../latticework/animation/animationService';
 import type { Engine } from '../latticework/animation/types';
@@ -109,7 +109,7 @@ export default function CharacterGLBScene({
     // ===== CREATE LOOMLARGE ENGINE =====
     // Select the appropriate AU preset based on character type
     const characterId = annotationConfigRef.current?.characterId;
-    const auPreset = characterId === 'betta' ? FISH_AU_MAPPING_CONFIG : CC4_PRESET;
+    const auPreset = characterId === 'betta' ? AU_MAPPING_CONFIG : CC4_PRESET;
     const engine = new LoomLargeThree({ auMappings: auPreset });
     if (typeof window !== 'undefined') {
       (window as any).engine = engine;
