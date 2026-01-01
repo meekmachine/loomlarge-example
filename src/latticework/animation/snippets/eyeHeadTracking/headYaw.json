@@ -2,14 +2,14 @@
   "name": "headYaw",
   "description": "Head turns left ↔ right using yaw continuum",
   "curves": {
-    "31": [
+    "51": [
       { "time": 0.0,  "intensity": 0.0 },
       { "time": 0.3,  "intensity": 0.65 },
       { "time": 0.6,  "intensity": 0.0 },
       { "time": 0.9,  "intensity": 0.0 },
       { "time": 1.2,  "intensity": 0.0 }
     ],
-    "32": [
+    "52": [
       { "time": 0.0,  "intensity": 0.0 },
       { "time": 0.3,  "intensity": 0.0 },
       { "time": 0.6,  "intensity": 0.0 },
