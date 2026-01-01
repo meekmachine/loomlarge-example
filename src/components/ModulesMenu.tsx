@@ -1,34 +1,165 @@
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef, memo, useCallback } from 'react';
 import {
   Box,
   Button,
-  IconButton,
   Text,
-  Switch,
-  Tooltip,
   Flex,
-  Accordion,
   Alert,
   Input,
   Field,
   VStack,
 } from '@chakra-ui/react';
-import { Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { Phone, PhoneOff, X } from 'lucide-react';
 import { toaster } from './ui/toaster';
 import modulesConfig from '../modules/config';
 import { Module, ModuleSettings, ModuleInstance } from '../types/modules';
+
+// Map module paths to preview videos
+const modulePreviewVideos: Record<string, string> = {
+  frenchQuiz: '/previews/betta.webm',
+  aiChat: '/previews/jonathan.webm',
+};
+
+// Video preview component that plays on hover
+function VideoPreview({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isHovered, setIsHovered] = useState(false);
+
+  const handleMouseEnter = useCallback(() => {
+    setIsHovered(true);
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+    }
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsHovered(false);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+  }, []);
+
+  return (
+    <Box
+      position="relative"
+      w="80px"
+      h="80px"
+      flexShrink={0}
+      borderRadius="lg"
+      overflow="hidden"
+      bg="gray.900"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <video
+        ref={videoRef}
+        src={src}
+        muted
+        loop
+        playsInline
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          opacity: isHovered ? 1 : 0.7,
+          transition: 'opacity 0.2s ease',
+        }}
+      />
+      {!isHovered && (
+        <Box
+          position="absolute"
+          inset={0}
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          bg="blackAlpha.400"
+          transition="opacity 0.2s ease"
+        >
+          <Box
+            w="24px"
+            h="24px"
+            borderRadius="full"
+            bg="whiteAlpha.800"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+          >
+            <Box
+              w={0}
+              h={0}
+              ml="2px"
+              borderLeft="8px solid"
+              borderLeftColor="gray.800"
+              borderTop="5px solid transparent"
+              borderBottom="5px solid transparent"
+            />
+          </Box>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// Inject keyframes into document head
+const injectKeyframes = () => {
+  const styleId = 'modules-menu-animations';
+  if (document.getElementById(styleId)) return;
+
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+    @keyframes expandRing {
+      0% {
+        transform: scale(1, 1);
+        opacity: 0.4;
+      }
+      100% {
+        transform: scale(1.6, 2.4);
+        opacity: 0;
+      }
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 20px rgba(72, 187, 120, 0.4);
+      }
+      50% {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 45px rgba(72, 187, 120, 0.7);
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  `;
+  document.head.appendChild(style);
+};
 
 interface ModulesMenuProps {
   animationManager?: any;
 }
 
 function ModulesMenu({ animationManager }: ModulesMenuProps) {
-  const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [moduleSettings, setModuleSettings] = useState<Record<string, ModuleSettings>>({});
-  const [activeModules, setActiveModules] = useState<Record<string, boolean>>({});
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [activeModule, setActiveModule] = useState<Module | null>(null);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [error, setError] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  // Inject keyframes on mount
+  useEffect(() => {
+    injectKeyframes();
+  }, []);
 
   // Load settings from localStorage or use default from config
   useEffect(() => {
@@ -42,37 +173,42 @@ function ModulesMenu({ animationManager }: ModulesMenuProps) {
     setModuleSettings(initialSettings);
   }, []);
 
-  // Save settings to localStorage
-  const saveSettingsToLocalStorage = () => {
-    Object.keys(moduleSettings).forEach((moduleName) => {
-      localStorage.setItem(moduleName, JSON.stringify(moduleSettings[moduleName]));
-    });
-  };
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        setIsPopupOpen(false);
+      }
+    };
 
-  const handleSwitchChange = async (module: Module, isChecked: boolean) => {
+    if (isPopupOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isPopupOpen]);
+
+  const handleModuleSelect = async (module: Module) => {
     try {
       const moduleInstance = await import(`../modules/${module.path}/index.tsx`) as ModuleInstance;
 
-      if (isChecked) {
-        if (!containerRef.current) {
-          console.error('Module container reference is invalid. Unable to start the module.');
-          setError('Module container reference is invalid. Unable to start the module.');
-          return;
-        }
-        setError('');
-
-        moduleInstance.start(
-          animationManager,
-          moduleSettings[module.name],
-          containerRef,
-          toaster
-        );
-
-        setActiveModules((prev) => ({ ...prev, [module.name]: true }));
-      } else {
-        moduleInstance.stop(animationManager);
-        setActiveModules((prev) => ({ ...prev, [module.name]: false }));
+      if (!containerRef.current) {
+        console.error('Module container reference is invalid. Unable to start the module.');
+        setError('Module container reference is invalid. Unable to start the module.');
+        return;
       }
+      setError('');
+
+      moduleInstance.start(
+        animationManager,
+        moduleSettings[module.name],
+        containerRef,
+        toaster
+      );
+
+      setActiveModule(module);
+      setIsPopupOpen(false);
     } catch (err: any) {
       console.error(`Failed to load the module: ${module.name}`, err);
       setError(`Failed to load the module: ${module.name}`);
@@ -83,8 +219,28 @@ function ModulesMenu({ animationManager }: ModulesMenuProps) {
     }
   };
 
-  const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen);
+  const handleEndCall = async () => {
+    if (!activeModule) return;
+
+    try {
+      const moduleInstance = await import(`../modules/${activeModule.path}/index.tsx`) as ModuleInstance;
+      moduleInstance.stop(animationManager);
+      setActiveModule(null);
+    } catch (err: any) {
+      console.error(`Failed to stop the module: ${activeModule.name}`, err);
+      toaster.error({
+        title: 'Module Error',
+        description: `Failed to stop ${activeModule.name}`,
+      });
+    }
+  };
+
+  const togglePopup = () => {
+    if (activeModule) {
+      handleEndCall();
+    } else {
+      setIsPopupOpen(!isPopupOpen);
+    }
   };
 
   return (
@@ -93,80 +249,177 @@ function ModulesMenu({ animationManager }: ModulesMenuProps) {
         position="fixed"
         right="1rem"
         top="1rem"
-        bg="gray.850"
-        p={4}
-        borderRadius="md"
-        boxShadow="lg"
         zIndex={1000}
-        borderWidth="1px"
-        borderColor="gray.700"
+        ref={popupRef}
       >
-        <Flex justify="space-between" align="center">
-          <Text fontSize="xl" mb={isMenuOpen ? 4 : 0} color="gray.50" fontWeight="bold">
-            Modules
-          </Text>
-          <IconButton
-            onClick={toggleMenu}
-            variant="outline"
-            size="sm"
-            aria-label="Toggle modules menu"
-            colorPalette="brand"
+        {/* Main Start Call / End Call Button with animated rings */}
+        <Box position="relative" display="inline-block">
+          {/* Expanding ring animations - only show when not in call */}
+          {!activeModule && (
+            <>
+              <Box
+                position="absolute"
+                inset={0}
+                borderRadius="full"
+                style={{
+                  border: '1.5px solid #68D391',
+                  animation: 'expandRing 4s ease-out infinite',
+                  pointerEvents: 'none',
+                }}
+              />
+              <Box
+                position="absolute"
+                inset={0}
+                borderRadius="full"
+                style={{
+                  border: '1.5px solid #68D391',
+                  animation: 'expandRing 4s ease-out infinite 1.33s',
+                  pointerEvents: 'none',
+                }}
+              />
+              <Box
+                position="absolute"
+                inset={0}
+                borderRadius="full"
+                style={{
+                  border: '1.5px solid #68D391',
+                  animation: 'expandRing 4s ease-out infinite 2.66s',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
+          )}
+
+          <Button
+            onClick={togglePopup}
+            size="lg"
+            px={6}
+            py={6}
+            borderRadius="full"
+            bg={activeModule ? 'red.500' : 'green.500'}
             color="white"
-            _hover={{ color: 'gray.200', bg: 'gray.700' }}
+            fontWeight="bold"
+            fontSize="lg"
+            style={{
+              animation: !activeModule ? 'pulseGlow 2s ease-in-out infinite' : undefined,
+            }}
+            _hover={{
+              bg: activeModule ? 'red.600' : 'green.600',
+              transform: 'scale(1.05)',
+            }}
+            _active={{
+              transform: 'scale(0.98)',
+            }}
+            transition="all 0.2s ease"
+            position="relative"
+            zIndex={1}
           >
-            {isMenuOpen ? <ChevronUp /> : <ChevronDown />}
-          </IconButton>
-        </Flex>
+            {activeModule ? (
+              <>
+                <PhoneOff size={24} style={{ marginRight: '8px' }} />
+                End Call
+              </>
+            ) : (
+              <>
+                <Phone size={24} style={{ marginRight: '8px' }} />
+                Start Call
+              </>
+            )}
+          </Button>
+        </Box>
 
-        {error && isMenuOpen && (
-          <Alert.Root status="error" mb={4}>
-            <Alert.Indicator />
-            <Alert.Content>{error}</Alert.Content>
-          </Alert.Root>
-        )}
+        {/* Popup Module Selector */}
+        {isPopupOpen && !activeModule && (
+          <Box
+            position="absolute"
+            top="100%"
+            right="0"
+            mt={3}
+            bg="gray.800"
+            borderRadius="2xl"
+            boxShadow="0 8px 32px rgba(0, 0, 0, 0.4)"
+            borderWidth="1px"
+            borderColor="gray.600"
+            overflow="hidden"
+            minW="320px"
+            style={{
+              animation: 'fadeIn 0.2s ease',
+            }}
+          >
+            {/* Header with close button */}
+            <Flex
+              justify="space-between"
+              align="center"
+              px={4}
+              py={3}
+              borderBottomWidth="1px"
+              borderColor="gray.700"
+              bg="gray.850"
+            >
+              <Text color="gray.100" fontWeight="semibold" fontSize="md">
+                Select an AI Experience
+              </Text>
+              <Button
+                onClick={() => setIsPopupOpen(false)}
+                variant="ghost"
+                size="sm"
+                p={1}
+                minW="auto"
+                color="gray.400"
+                _hover={{ color: 'white', bg: 'gray.700' }}
+              >
+                <X size={18} />
+              </Button>
+            </Flex>
 
-        {isMenuOpen && (
-          <Accordion.Root multiple>
-            {modulesConfig.modules.map((module, index) => (
-              <Accordion.Item key={index} value={module.name} borderColor="gray.700">
-                <Accordion.ItemTrigger bg="gray.800" _hover={{ bg: 'gray.700' }}>
-                  <Box flex="1" textAlign="left" color="gray.50">
-                    {module.name}
-                  </Box>
-                  <Accordion.ItemIndicator color="white" />
-                </Accordion.ItemTrigger>
-                <Accordion.ItemContent pb={4} bg="gray.800">
-                  <VStack align="stretch" gap={3}>
-                    <Flex align="center" justify="space-between">
-                      <Tooltip.Root>
-                        <Tooltip.Trigger asChild>
-                          <Box as="span" cursor="pointer">
-                            <Info size={16} color="gray" />
-                          </Box>
-                        </Tooltip.Trigger>
-                        <Tooltip.Positioner>
-                          <Tooltip.Content>{module.description}</Tooltip.Content>
-                        </Tooltip.Positioner>
-                      </Tooltip.Root>
-                      <Switch.Root
-                        checked={activeModules[module.name] || false}
-                        onCheckedChange={(details) => handleSwitchChange(module, details.checked)}
-                        colorPalette="brand"
-                      >
-                        <Switch.HiddenInput />
-                        <Switch.Control>
-                          <Switch.Thumb />
-                        </Switch.Control>
-                      </Switch.Root>
-                    </Flex>
+            {error && (
+              <Alert.Root status="error" m={3}>
+                <Alert.Indicator />
+                <Alert.Content fontSize="sm">{error}</Alert.Content>
+              </Alert.Root>
+            )}
 
-                    {/* Settings for AI Chat module */}
-                    {module.name === 'AI Chat' && (
+            {/* Module List */}
+            <VStack gap={0} align="stretch">
+              {modulesConfig.modules.map((module, index) => (
+                <Box key={index}>
+                  <Flex
+                    as="button"
+                    w="100%"
+                    textAlign="left"
+                    px={4}
+                    py={4}
+                    gap={4}
+                    align="center"
+                    bg="transparent"
+                    _hover={{ bg: 'gray.700' }}
+                    transition="background 0.15s ease"
+                    onClick={() => handleModuleSelect(module)}
+                    cursor="pointer"
+                  >
+                    {/* Video Preview */}
+                    {modulePreviewVideos[module.path] && (
+                      <VideoPreview src={modulePreviewVideos[module.path]} />
+                    )}
+
+                    {/* Text Content */}
+                    <Box flex={1}>
+                      <Text color="white" fontWeight="medium" fontSize="md" mb={1}>
+                        {module.name}
+                      </Text>
+                      <Text color="gray.400" fontSize="sm" lineHeight="short">
+                        {module.description}
+                      </Text>
+                    </Box>
+                  </Flex>
+
+                  {/* API Key input for AI Chat */}
+                  {module.name === 'AI Chat' && (
+                    <Box px={4} pb={3} onClick={(e) => e.stopPropagation()}>
                       <Field.Root>
-                        <Field.Label fontSize="sm" color="white">Anthropic API Key</Field.Label>
                         <Input
                           type="password"
-                          placeholder="sk-ant-..."
+                          placeholder="Enter Anthropic API Key (sk-ant-...)"
                           size="sm"
                           value={moduleSettings[module.name]?.anthropicApiKey || ''}
                           onChange={(e) => {
@@ -178,34 +431,38 @@ function ModulesMenu({ animationManager }: ModulesMenuProps) {
                               ...moduleSettings,
                               [module.name]: newSettings,
                             });
-                            // Save to localStorage immediately
                             localStorage.setItem('anthropic_api_key', e.target.value);
                             localStorage.setItem(module.name, JSON.stringify(newSettings));
                           }}
                           bg="gray.700"
                           borderColor="gray.600"
+                          borderRadius="lg"
                           color="gray.50"
                           _hover={{ borderColor: 'gray.500' }}
-                          _focus={{ borderColor: 'brand.500', bg: 'gray.700' }}
+                          _focus={{ borderColor: 'green.500', bg: 'gray.700' }}
                         />
-                        <Text fontSize="xs" color="white" mt={1}>
-                          Get your API key from{' '}
+                        <Text fontSize="xs" color="gray.500" mt={1}>
+                          Get your key from{' '}
                           <a
                             href="https://console.anthropic.com/"
                             target="_blank"
                             rel="noopener noreferrer"
-                            style={{ textDecoration: 'underline', color: '#60A5FA' }}
+                            style={{ textDecoration: 'underline', color: '#68D391' }}
                           >
                             console.anthropic.com
                           </a>
                         </Text>
                       </Field.Root>
-                    )}
-                  </VStack>
-                </Accordion.ItemContent>
-              </Accordion.Item>
-            ))}
-          </Accordion.Root>
+                    </Box>
+                  )}
+
+                  {index < modulesConfig.modules.length - 1 && (
+                    <Box h="1px" bg="gray.700" mx={4} />
+                  )}
+                </Box>
+              ))}
+            </VStack>
+          </Box>
         )}
       </Box>
 

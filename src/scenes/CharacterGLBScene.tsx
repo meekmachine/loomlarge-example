@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoomLargeThree, CC4_PRESET } from 'loomlarge';
+import { FISH_AU_MAPPING_CONFIG } from '../presets/bettaFish';
 import { AnnotationCameraController } from '../camera';
 import { createAnimationService, type AnimationService } from '../latticework/animation/animationService';
 import type { Engine } from '../latticework/animation/types';
@@ -18,6 +19,9 @@ function createEngineAdapter(engine: LoomLargeThree): Engine {
     transitionMorph: (key, v, dur) => engine.transitionMorph(key, v, dur),
     setViseme: (idx, v, jawScale) => engine.setViseme(idx, v, jawScale),
     transitionViseme: (idx, v, dur, jawScale) => engine.transitionViseme(idx, v, dur, jawScale),
+    getCompositeRotations: () => engine.getCompositeRotations(),
+    // NEW: buildClip for AnimationMixer-based clip playback
+    buildClip: (clipName, curves, options) => engine.buildClip(clipName, curves, options),
     onSnippetEnd: (name) => {
       try {
         window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
@@ -103,7 +107,10 @@ export default function CharacterGLBScene({
     scene.add(dir);
 
     // ===== CREATE LOOMLARGE ENGINE =====
-    const engine = new LoomLargeThree({ auMappings: CC4_PRESET });
+    // Select the appropriate AU preset based on character type
+    const characterId = annotationConfigRef.current?.characterId;
+    const auPreset = characterId === 'betta' ? FISH_AU_MAPPING_CONFIG : CC4_PRESET;
+    const engine = new LoomLargeThree({ auMappings: auPreset });
     if (typeof window !== 'undefined') {
       (window as any).engine = engine;
     }
@@ -160,6 +167,15 @@ export default function CharacterGLBScene({
 
         // Initialize LoomLarge with the model (cast to any to handle type differences)
         engine.onReady({ meshes, model: model as any });
+
+        // Load baked animations from the GLB file if present
+        if (gltf.animations && gltf.animations.length > 0) {
+          engine.loadAnimationClips(gltf.animations);
+          console.log(`[Scene] Loaded ${gltf.animations.length} baked animations:`, gltf.animations.map(a => a.name));
+        }
+
+        // Wire up baked animation engine to animation service for RxJS events
+        anim.setBakedAnimationEngine?.(engine as any);
 
         // Start the engine's internal animation loop
         engine.start();

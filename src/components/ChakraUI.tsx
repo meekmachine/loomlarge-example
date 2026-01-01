@@ -4,6 +4,7 @@
  */
 import { ChakraProvider, defaultSystem } from '@chakra-ui/react';
 import SliderDrawer from './SliderDrawer';
+import CharacterSwitcher from './CharacterSwitcher';
 import ModulesMenu from './ModulesMenu';
 import { Toaster, toaster } from './ui/toaster';
 import type { CharacterAnnotationConfig } from '../camera/types';
@@ -30,6 +31,9 @@ export default function ChakraUI({
         isOpen={drawerOpen}
         onToggle={onDrawerToggle}
         disabled={false}
+      />
+      <CharacterSwitcher
+        isDrawerOpen={drawerOpen}
         onCharacterChange={onCharacterChange}
         currentCharacterConfig={currentCharacterConfig}
       />

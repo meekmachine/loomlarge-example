@@ -21,7 +21,13 @@
       "Bash(npm publish)",
       "Bash(chmod:*)",
       "Bash(git merge:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(mkdir:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git -C /Users/jonathan/Decembre/LoomLarge diff src/presets/bettaFish.ts)",
+      "Bash(git -C /Users/jonathan/Decembre/LoomLarge status)",
+      "Bash(ls:*)",
+      "Bash(npm run link:loomlarge:*)"
     ],
     "deny": [],
     "ask": []

@@ -11,6 +11,7 @@ import {
   Portal,
   Input,
   Collapsible,
+  Slider,
 } from '@chakra-ui/react';
 import { toaster } from './ui/toaster';
 import SnippetCard from './SnippetCard';
@@ -22,11 +23,12 @@ import {
   FaUpload,
   FaFolderOpen,
   FaChevronDown,
-  FaChevronRight
+  FaChevronRight,
 } from 'react-icons/fa';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Film } from 'lucide-react';
 import { useThreeState } from '../context/threeContext';
-import { useSnippets } from '../hooks/useAnimationStream';
+import { useSnippets, useBakedClips, usePlayingBakedAnimations } from '../hooks/useAnimationStream';
+import type { BakedClipInfo, BakedAnimationUIState } from '../latticework/animation/animationEvents';
 
 // Agency info type
 interface AgencyInfo {
@@ -179,6 +181,45 @@ function PlaybackControls() {
   const [enginePaused, setEnginePaused] = useState(false);
 
   const [jsonFilename, setJsonFilename] = useState('animation.json');
+
+  // Baked animation state - using RxJS hooks instead of polling
+  const bakedClips = useBakedClips();
+  const playingBakedAnimations = usePlayingBakedAnimations();
+  const [bakedAnimationsCollapsed, setBakedAnimationsCollapsed] = useState(false);
+
+  // Handle playing a baked animation - via animation service
+  const handlePlayBakedAnimation = useCallback((clipName: string) => {
+    if (!anim) return;
+    const handle = anim.playBakedAnimation?.(clipName, { loop: true });
+    if (handle) {
+      toaster.success({ title: 'Playing Animation', description: clipName });
+    }
+  }, [anim]);
+
+  // Handle stopping a baked animation
+  const handleStopBakedAnimation = useCallback((clipName: string) => {
+    anim?.stopBakedAnimation?.(clipName);
+  }, [anim]);
+
+  // Handle pausing a baked animation
+  const handlePauseBakedAnimation = useCallback((clipName: string) => {
+    anim?.pauseBakedAnimation?.(clipName);
+  }, [anim]);
+
+  // Handle resuming a baked animation
+  const handleResumeBakedAnimation = useCallback((clipName: string) => {
+    anim?.resumeBakedAnimation?.(clipName);
+  }, [anim]);
+
+  // Handle setting baked animation speed
+  const handleSetBakedAnimationSpeed = useCallback((clipName: string, speed: number) => {
+    anim?.setBakedAnimationSpeed?.(clipName, speed);
+  }, [anim]);
+
+  // Handle setting baked animation intensity
+  const handleSetBakedAnimationIntensity = useCallback((clipName: string, intensity: number) => {
+    anim?.setBakedAnimationWeight?.(clipName, intensity);
+  }, [anim]);
 
   // Use RxJS hook for efficient state subscriptions
   // Only re-renders when meaningful events occur (not on every tick)
@@ -508,6 +549,33 @@ function PlaybackControls() {
             </Menu.Positioner>
           </Portal>
         </Menu.Root>
+
+        {/* Baked Animations from GLB/GLTF */}
+        <Menu.Root>
+          <Menu.Trigger asChild>
+            <Button colorPalette="orange" size="sm">
+              <Film size={14} /> Baked <ChevronDown />
+            </Button>
+          </Menu.Trigger>
+          <Portal>
+            <Menu.Positioner>
+              <Menu.Content maxH="300px" overflowY="auto">
+                {bakedClips.length === 0 && (
+                  <Menu.Item value="none" disabled>No baked animations in model</Menu.Item>
+                )}
+                {bakedClips.map((clip) => (
+                  <Menu.Item
+                    key={clip.name}
+                    value={clip.name}
+                    onClick={() => handlePlayBakedAnimation(clip.name)}
+                  >
+                    {clip.name} ({clip.duration.toFixed(1)}s)
+                  </Menu.Item>
+                ))}
+              </Menu.Content>
+            </Menu.Positioner>
+          </Portal>
+        </Menu.Root>
       </HStack>
 
       {/* Global playback controls */}
@@ -548,6 +616,145 @@ function PlaybackControls() {
           </Text>
         </HStack>
       </VStack>
+
+      {/* Baked Animations - Playing */}
+      {playingBakedAnimations.length > 0 && (
+        <Box mb={4} p={2} bg="gray.700" borderRadius="md">
+          <HStack
+            mb={2}
+            cursor="pointer"
+            onClick={() => setBakedAnimationsCollapsed(!bakedAnimationsCollapsed)}
+          >
+            <IconButton
+              size="xs"
+              variant="ghost"
+              aria-label={bakedAnimationsCollapsed ? 'Expand' : 'Collapse'}
+              color="orange.300"
+            >
+              {bakedAnimationsCollapsed ? <FaChevronRight /> : <FaChevronDown />}
+            </IconButton>
+            <Film size={16} color="#ED8936" />
+            <Text fontSize="sm" fontWeight="bold" color="orange.300">
+              Baked Animations ({playingBakedAnimations.length})
+            </Text>
+            <Button
+              size="xs"
+              colorPalette="red"
+              ml="auto"
+              onClick={(e) => {
+                e.stopPropagation();
+                anim?.stopAllBakedAnimations?.();
+              }}
+            >
+              <FaStop /> Stop All
+            </Button>
+          </HStack>
+
+          <Collapsible.Root open={!bakedAnimationsCollapsed}>
+            <Collapsible.Content>
+              <VStack align="stretch" gap={2}>
+                {playingBakedAnimations.map((anim) => (
+                  <Box
+                    key={anim.name}
+                    p={2}
+                    bg="gray.800"
+                    borderRadius="md"
+                    borderLeft="3px solid"
+                    borderColor="orange.400"
+                  >
+                    <HStack mb={2}>
+                      <Text fontSize="xs" fontWeight="bold" color="white" flex={1}>
+                        {anim.name}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {anim.time.toFixed(1)}s / {anim.duration.toFixed(1)}s
+                      </Text>
+                    </HStack>
+
+                    <HStack gap={2} mb={2}>
+                      {anim.isPaused ? (
+                        <IconButton
+                          size="xs"
+                          colorPalette="green"
+                          aria-label="Resume"
+                          onClick={() => handleResumeBakedAnimation(anim.name)}
+                        >
+                          <FaPlay />
+                        </IconButton>
+                      ) : (
+                        <IconButton
+                          size="xs"
+                          colorPalette="yellow"
+                          aria-label="Pause"
+                          onClick={() => handlePauseBakedAnimation(anim.name)}
+                        >
+                          <FaPause />
+                        </IconButton>
+                      )}
+                      <IconButton
+                        size="xs"
+                        colorPalette="red"
+                        aria-label="Stop"
+                        onClick={() => handleStopBakedAnimation(anim.name)}
+                      >
+                        <FaStop />
+                      </IconButton>
+                    </HStack>
+
+                    {/* Speed Control */}
+                    <HStack gap={2} mb={1}>
+                      <Text fontSize="xs" color="gray.400" w="60px">Speed:</Text>
+                      <Slider.Root
+                        size="sm"
+                        min={0.1}
+                        max={3}
+                        step={0.1}
+                        value={[anim.speed]}
+                        onValueChange={(e) => handleSetBakedAnimationSpeed(anim.name, e.value[0])}
+                        flex={1}
+                      >
+                        <Slider.Control>
+                          <Slider.Track>
+                            <Slider.Range />
+                          </Slider.Track>
+                          <Slider.Thumb index={0} />
+                        </Slider.Control>
+                      </Slider.Root>
+                      <Text fontSize="xs" color="gray.400" w="40px" textAlign="right">
+                        {anim.speed.toFixed(1)}x
+                      </Text>
+                    </HStack>
+
+                    {/* Intensity/Weight Control */}
+                    <HStack gap={2}>
+                      <Text fontSize="xs" color="gray.400" w="60px">Weight:</Text>
+                      <Slider.Root
+                        size="sm"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={[anim.weight]}
+                        onValueChange={(e) => handleSetBakedAnimationIntensity(anim.name, e.value[0])}
+                        flex={1}
+                      >
+                        <Slider.Control>
+                          <Slider.Track>
+                            <Slider.Range />
+                          </Slider.Track>
+                          <Slider.Thumb index={0} />
+                        </Slider.Control>
+                      </Slider.Root>
+                      <Text fontSize="xs" color="gray.400" w="40px" textAlign="right">
+                        {(anim.weight * 100).toFixed(0)}%
+                      </Text>
+                    </HStack>
+                  </Box>
+                ))}
+              </VStack>
+            </Collapsible.Content>
+          </Collapsible.Root>
+        </Box>
+      )}
 
       {/* Download / Load JSON */}
       <HStack gap={2} mb={4}>

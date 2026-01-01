@@ -11,8 +11,8 @@ import {
   CloseButton,
 } from '@chakra-ui/react';
 import { useSelector } from '@xstate/react';
-import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe, FaUser } from 'react-icons/fa';
-import { AU_INFO, type AUInfo } from 'loomlarge';
+import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe, FaTheaterMasks } from 'react-icons/fa';
+import type { AUInfo } from 'loomlarge';
 import AUSection from './au/AUSection';
 import VisemeSection from './au/VisemeSection';
 import TTSSection from './au/TTSSection';
@@ -23,11 +23,9 @@ import DockableAccordionItem from './au/DockableAccordionItem';
 import PlaybackControls from './PlaybackControls';
 import MeshPanel from './au/MeshPanel';
 import SkyboxSection from './au/SkyboxSection';
-import CharacterSection from './au/CharacterSection';
 import { useThreeState } from '../context/threeContext';
 import type { NormalizedSnippet, CurvePoint } from '../latticework/animation/types';
 import { LoomLargeThree } from 'loomlarge';
-import type { CharacterAnnotationConfig } from '../camera/types';
 
 // Stable empty array reference - MUST be outside component to prevent re-renders
 const EMPTY_SNIPPETS: NormalizedSnippet[] = [];
@@ -112,7 +110,7 @@ const tabStyles = `
 `;
 
 // Tab definitions
-type TabId = 'character' | 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
+type TabId = 'animation' | 'speech' | 'blink' | 'aus' | 'visemes' | 'tracking' | 'hair' | 'meshes' | 'skybox';
 
 interface TabDef {
   id: TabId;
@@ -121,7 +119,6 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { id: 'character', icon: FaUser, label: 'Character' },
   { id: 'animation', icon: FaPlay, label: 'Animation' },
   { id: 'speech', icon: FaMicrophone, label: 'Speech' },
   { id: 'blink', icon: FaRegEyeSlash, label: 'Blink' },
@@ -137,8 +134,6 @@ interface SliderDrawerProps {
   isOpen: boolean;
   onToggle: () => void;
   disabled?: boolean;
-  onCharacterChange?: (config: CharacterAnnotationConfig) => void;
-  currentCharacterConfig?: CharacterAnnotationConfig;
 }
 
 type Keyframe = { time: number; value: number };
@@ -169,11 +164,10 @@ function injectStyles() {
 
 // Icon components map - avoid recreating elements
 const TAB_ICONS: Record<TabId, React.ReactNode> = {
-  character: <FaUser />,
   animation: <FaPlay />,
   speech: <FaMicrophone />,
   blink: <FaRegEyeSlash />,
-  aus: <FaSmile />,
+  aus: <FaTheaterMasks />,
   visemes: <FaComment />,
   tracking: <FaEye />,
   hair: <FaCut />,
@@ -184,10 +178,12 @@ const TAB_ICONS: Record<TabId, React.ReactNode> = {
 // Pure CSS tab bar - uses event delegation to avoid per-button handlers
 const TabBar = memo(({
   activeTab,
-  onTabClick
+  onTabClick,
+  profileEmoji
 }: {
   activeTab: TabId;
   onTabClick: (tab: TabId) => void;
+  profileEmoji?: string;
 }) => {
   // Inject styles on first render
   useEffect(() => {
@@ -225,7 +221,12 @@ const TabBar = memo(({
           aria-label={tab.label}
           type="button"
         >
-          {TAB_ICONS[tab.id]}
+          {/* Use profile emoji for AU tab, otherwise use icon */}
+          {tab.id === 'aus' && profileEmoji ? (
+            <span style={{ fontSize: '1.25rem' }}>{profileEmoji}</span>
+          ) : (
+            TAB_ICONS[tab.id]
+          )}
         </button>
       ))}
     </nav>
@@ -262,8 +263,8 @@ const MeshesTabContent = memo(({ engine }: { engine: LoomLargeThree | null }) =>
 ));
 
 // Skybox Tab
-const SkyboxTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) => (
-  <SkyboxSection engine={engine} disabled={disabled} defaultExpanded />
+const SkyboxTabContent = memo(({ disabled }: { disabled: boolean }) => (
+  <SkyboxSection disabled={disabled} defaultExpanded />
 ));
 
 // Hair Tab
@@ -390,7 +391,13 @@ const AUTabContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null
     [snippets, buildAuCurves, showOnlyPlayingSnippets]
   );
 
-  const actionUnits = useMemo(() => Object.values(AU_INFO), []);
+  // Get AU info from engine config - works for any character type
+  const actionUnits = useMemo(() => {
+    if (!engine) return [];
+    const config = engine.getAUMappings();
+    const auInfo = config.auInfo || {};
+    return Object.values(auInfo);
+  }, [engine]);
 
   const auGroups = useMemo(() => {
     const groups: Record<string, AUInfo[]> = {};
@@ -510,8 +517,6 @@ interface TabContentContainerProps {
   mountedTabs: Set<TabId>;
   engine: LoomLargeThree | null;
   disabled: boolean;
-  onCharacterChange?: (config: CharacterAnnotationConfig) => void;
-  currentCharacterConfig?: CharacterAnnotationConfig;
 }
 
 // Memoized content wrapper - uses CSS class for visibility (no re-render on tab switch)
@@ -549,40 +554,16 @@ const MemoizedTrackingContent = memo(({ engine, disabled }: { engine: LoomLargeT
 const MemoizedMeshesContent = memo(({ engine }: { engine: LoomLargeThree | null }) =>
   <MeshesTabContent engine={engine} />
 );
-const MemoizedSkyboxContent = memo(({ engine, disabled }: { engine: LoomLargeThree | null; disabled: boolean }) =>
-  <SkyboxTabContent engine={engine} disabled={disabled} />
+const MemoizedSkyboxContent = memo(({ disabled }: { disabled: boolean }) =>
+  <SkyboxTabContent disabled={disabled} />
 );
 const MemoizedHairContent = memo(({ disabled }: { disabled: boolean }) =>
   <HairTabContent disabled={disabled} />
 );
-const MemoizedCharacterContent = memo(({
-  onCharacterChange,
-  currentCharacterConfig,
-  disabled
-}: {
-  onCharacterChange?: (config: CharacterAnnotationConfig) => void;
-  currentCharacterConfig?: CharacterAnnotationConfig;
-  disabled: boolean;
-}) =>
-  <CharacterSection
-    onCharacterChange={onCharacterChange}
-    currentCharacterConfig={currentCharacterConfig}
-    disabled={disabled}
-  />
-);
 
-const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled, onCharacterChange, currentCharacterConfig }: TabContentContainerProps) => {
+const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled }: TabContentContainerProps) => {
   return (
     <>
-      {mountedTabs.has('character') && (
-        <TabPanel tabId="character" isActive={activeTab === 'character'}>
-          <MemoizedCharacterContent
-            onCharacterChange={onCharacterChange}
-            currentCharacterConfig={currentCharacterConfig}
-            disabled={disabled}
-          />
-        </TabPanel>
-      )}
       {mountedTabs.has('animation') && (
         <TabPanel tabId="animation" isActive={activeTab === 'animation'}>
           <MemoizedAnimationContent />
@@ -625,7 +606,7 @@ const TabContentContainer = memo(({ activeTab, mountedTabs, engine, disabled, on
       )}
       {mountedTabs.has('skybox') && (
         <TabPanel tabId="skybox" isActive={activeTab === 'skybox'}>
-          <MemoizedSkyboxContent engine={engine} disabled={disabled} />
+          <MemoizedSkyboxContent disabled={disabled} />
         </TabPanel>
       )}
     </>
@@ -638,15 +619,21 @@ export default function SliderDrawer({
   isOpen,
   onToggle,
   disabled = false,
-  onCharacterChange,
-  currentCharacterConfig,
 }: SliderDrawerProps) {
   const { engine } = useThreeState();
 
-  const [activeTab, setActiveTab] = useState<TabId>('character');
+  const [activeTab, setActiveTab] = useState<TabId>('animation');
 
   // Track which tabs have been mounted (for lazy loading)
-  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set(['character']));
+  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set(['animation']));
+
+  // Get profile emoji from engine config (only for non-human characters like fish)
+  // Human characters use the default FaTheaterMasks icon instead
+  const profileEmoji = useMemo(() => {
+    if (!engine) return undefined;
+    const config = engine.getAUMappings();
+    return config.emoji; // Only return emoji if explicitly defined (e.g., fish uses 🐟)
+  }, [engine]);
 
   // Lazy rendering - only render content after first open
   const hasBeenOpenedRef = useRef(false);
@@ -686,6 +673,7 @@ export default function SliderDrawer({
         placement="start"
         onOpenChange={(details) => { if (!details.open) onToggle(); }}
         size="md"
+        modal={false}
       >
         <Drawer.Positioner>
           {!isOpen && !hasBeenOpened ? null : (
@@ -701,7 +689,7 @@ export default function SliderDrawer({
               </Drawer.CloseTrigger>
 
               <HStack align="stretch" h="100%" gap={0}>
-                <TabBar activeTab={activeTab} onTabClick={handleTabClick} />
+                <TabBar activeTab={activeTab} onTabClick={handleTabClick} profileEmoji={profileEmoji} />
 
                 <Box flex={1} display="flex" flexDirection="column" overflow="hidden">
                   <Drawer.Body bg="transparent" flex={1} overflowY="auto" pt={4}>
@@ -710,8 +698,6 @@ export default function SliderDrawer({
                       mountedTabs={mountedTabs}
                       engine={engine}
                       disabled={disabled}
-                      onCharacterChange={onCharacterChange}
-                      currentCharacterConfig={currentCharacterConfig}
                     />
                   </Drawer.Body>
                 </Box>

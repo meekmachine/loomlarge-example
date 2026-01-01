@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect, lazy, Suspense } from 'react';
 import CharacterGLBScene, { type CharacterReady } from './scenes/CharacterGLBScene';
 import Preloader from './components/Preloader';
-import { ThreeProvider, useSetEngine, useThreeOptional } from './context/threeContext';
+import { ThreeProvider, useThreeOptional } from './context/threeContext';
 import { ModulesProvider, useModulesContext } from './context/ModulesContext';
 import { createEyeHeadTrackingService } from './latticework/eyeHeadTracking/eyeHeadTrackingService';
 import { getDefaultCharacterConfig } from './presets/annotations';
@@ -20,7 +20,6 @@ const getToaster = () => {
 };
 
 function AppContent() {
-  const setEngine = useSetEngine();
   const threeCtx = useThreeOptional();
   const { setEyeHeadTrackingService, setCameraController } = useModulesContext();
 
@@ -43,9 +42,10 @@ function AppContent() {
   }, []);
 
   const handleReady = useCallback(
-    ({ cameraController, engine, anim }: CharacterReady) => {
-      // Pass engine and anim to context
-      setEngine(engine, anim);
+    ({ cameraController, engine, anim, scene, renderer }: CharacterReady) => {
+      // Pass engine, anim, scene, and renderer to context
+      threeCtx?.setEngine(engine, anim);
+      threeCtx?.setScene(scene, renderer);
 
       setCameraController(cameraController);
       setIsLoading(false);
@@ -56,7 +56,7 @@ function AppContent() {
         toaster.create({ title: 'Ready', type: 'success', duration: 2000 });
       });
     },
-    [setEngine, setCameraController]
+    [threeCtx, setCameraController]
   );
 
   const handleDrawerToggle = useCallback(() => {

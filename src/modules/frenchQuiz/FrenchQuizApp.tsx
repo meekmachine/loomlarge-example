@@ -20,10 +20,10 @@ import { useModulesContext } from '../../context/ModulesContext';
 interface FrenchQuizAppProps {
   animationManager: any;
   settings: ModuleSettings;
-  toast: any;
+  toaster: any;
 }
 
-export default function FrenchQuizApp({ animationManager, settings, toast }: FrenchQuizAppProps) {
+export default function FrenchQuizApp({ animationManager, settings, toaster }: FrenchQuizAppProps) {
   const [showWelcome, setShowWelcome] = useState(true);
   const [showFinish, setShowFinish] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -40,7 +40,6 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
   const lipSyncRef = useRef<LipSyncService | null>(null);
   const conversationRef = useRef<ConversationService | null>(null);
   const eyeHeadTrackingRef = useRef<EyeHeadTrackingService | null>(null);
-  const userToastRef = useRef<any>(null);
 
   // Quiz state refs (for use in generator)
   const questionIndexRef = useRef(0);
@@ -115,10 +114,9 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
         },
         onError: (error) => {
           console.error('[FrenchQuiz] TTS error:', error);
-          toast({
+          toaster.error({
             title: 'Speech Error',
             description: 'Could not speak',
-            status: 'error',
             duration: 3000,
           });
         },
@@ -146,10 +144,9 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
               }
             }, 500);
           } else {
-            toast({
+            toaster.error({
               title: 'Listening Error',
               description: 'Could not hear you. Click mic to retry.',
-              status: 'error',
               duration: 3000,
             });
           }
@@ -202,10 +199,9 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
           // Update global context with speaking text
           setSpeakingText(text);
 
-          toast({
+          toaster.info({
             title: 'Agent',
             description: text,
-            status: 'info',
             duration: 3000,
           });
         },
@@ -259,42 +255,24 @@ export default function FrenchQuizApp({ animationManager, settings, toast }: Fre
       setTranscribedText(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animationManager, toast]);
+  }, [animationManager, toaster]);
 
   // Update user speech toast
   const updateUserToast = (text: string, isFinal: boolean, isInterruption: boolean) => {
-    const title = isInterruption
-      ? isFinal
-        ? 'You (interrupting - final)'
-        : 'You (interrupting...)'
-      : isFinal
-      ? 'You (final)'
-      : 'You (listening...)';
-
+    // Only show final transcriptions to avoid spam
     if (isFinal) {
-      if (userToastRef.current && toast.update) {
-        toast.update(userToastRef.current, {
+      const title = isInterruption ? 'You (interrupting)' : 'You';
+      if (isInterruption) {
+        toaster.warning({
           title,
           description: text,
-          status: isInterruption ? 'warning' : 'success',
           duration: 2500,
-          isClosable: true,
         });
-      }
-      userToastRef.current = null;
-    } else {
-      if (!userToastRef.current) {
-        userToastRef.current = toast({
+      } else {
+        toaster.success({
           title,
           description: text,
-          status: isInterruption ? 'warning' : 'info',
-          duration: null,
-          isClosable: false,
-        });
-      } else if (toast.update) {
-        toast.update(userToastRef.current, {
-          title,
-          description: text,
+          duration: 2500,
         });
       }
     }

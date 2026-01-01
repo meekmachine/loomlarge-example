@@ -11,14 +11,13 @@ export function start(
   animationManager: any,
   settings: ModuleSettings,
   containerRef: React.RefObject<HTMLDivElement>,
-  toast: any
+  toaster: any
 ) {
   if (!containerRef.current) {
     console.error('Container ref is invalid');
-    toast({
+    toaster.error({
       title: 'Error',
       description: 'Module container not found',
-      status: 'error',
       duration: 3000,
     });
     return;
@@ -36,16 +35,15 @@ export function start(
         <AIChatApp
           animationManager={animationManager}
           settings={settings}
-          toast={toast}
+          toaster={toaster}
         />
       </ModulesProvider>
     </ChakraProvider>
   );
 
-  toast({
+  toaster.success({
     title: 'AI Chat Started',
     description: 'Conversational AI is now active',
-    status: 'success',
     duration: 2000,
   });
 }

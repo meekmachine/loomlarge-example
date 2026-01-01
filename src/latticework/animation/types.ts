@@ -1,6 +1,9 @@
 // Unified types for the Animation Agency (Machine + Service + Scheduler)
 
-import type { TransitionHandle } from 'loomlarge';
+import type { TransitionHandle, ClipHandle, ClipOptions } from 'loomlarge';
+
+// Re-export types from loomlarge for convenience
+export type { CurvePoint as LoomCurvePoint, CurvesMap as LoomCurvesMap } from 'loomlarge';
 
 /**
  * Host capabilities interface - what the engine must provide to the animation service.
@@ -14,6 +17,27 @@ export interface HostCaps {
   setViseme?(index: number, v: number, jawScale?: number): void;
   transitionViseme?(index: number, v: number, durationMs: number, jawScale?: number): TransitionHandle;
   onSnippetEnd?(name: string): void;
+  /** Get the composite rotations for the current character preset */
+  getCompositeRotations?(): Array<{
+    node: string;
+    pitch: { aus: number[]; axis: string; negative?: number; positive?: number } | null;
+    yaw: { aus: number[]; axis: string; negative?: number; positive?: number } | null;
+    roll: { aus: number[]; axis: string; negative?: number; positive?: number } | null;
+  }>;
+
+  /**
+   * Build and play an AnimationClip from curve data.
+   * When available, the scheduler uses this instead of per-keyframe transitions.
+   * @param clipName - Unique name for the clip
+   * @param curves - Map of curve IDs to keyframe arrays
+   * @param options - Playback options
+   * @returns Handle for controlling the clip, or null if not supported
+   */
+  buildClip?(
+    clipName: string,
+    curves: Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>>,
+    options?: ClipOptions
+  ): ClipHandle | null;
 }
 
 /**
@@ -247,6 +271,45 @@ export type AnimEvent =
 // ---------- Scheduler plumbing ----------
 export type RuntimeSched = { name: string; startsAt: number; offset: number; enabled: boolean };
 export type ScheduleOpts = { startInSec?: number; startAtSec?: number; offsetSec?: number; priority?: number };
+
+// ---------- Baked Animation Engine Interface ----------
+
+/**
+ * Interface for baked animation engine capabilities.
+ * Used by animation service to control baked animations from GLB/GLTF files.
+ */
+export interface BakedAnimationEngine {
+  getAnimationClips(): Array<{ name: string; duration: number }>;
+  getPlayingAnimations(): Array<{
+    name: string;
+    time: number;
+    duration: number;
+    speed: number;
+    weight: number;
+    isPlaying: boolean;
+    isPaused: boolean;
+    loop: boolean;
+  }>;
+  playAnimation(clipName: string, options?: { loop?: boolean; speed?: number; weight?: number }): {
+    getState: () => {
+      name: string;
+      time: number;
+      duration: number;
+      speed: number;
+      weight: number;
+      isPlaying: boolean;
+      isPaused: boolean;
+      loop: boolean;
+    };
+    finished: Promise<void>;
+  } | null;
+  stopAnimation(clipName: string): void;
+  pauseAnimation(clipName: string): void;
+  resumeAnimation(clipName: string): void;
+  setAnimationSpeed(clipName: string, speed: number): void;
+  setAnimationIntensity(clipName: string, weight: number): void;
+  stopAllAnimations(): void;
+}
 
 // ---------- Narrow utilities ----------
 export const isNumericId = (s: string) => /^\d+$/.test(s);

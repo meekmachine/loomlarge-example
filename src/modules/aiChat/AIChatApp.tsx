@@ -27,7 +27,7 @@ import Anthropic from '@anthropic-ai/sdk';
 interface AIChatAppProps {
   animationManager: any;
   settings: ModuleSettings;
-  toast: any;
+  toaster: any;
 }
 
 // FACS emotion mapping to ARKit Action Units
@@ -108,7 +108,7 @@ const EMOTION_LIBRARY: Record<string, EmotionFACS> = {
   },
 };
 
-export default function AIChatApp({ animationManager, settings, toast }: AIChatAppProps) {
+export default function AIChatApp({ animationManager, settings, toaster }: AIChatAppProps) {
   const [conversationState, setConversationState] = useState<string>('idle');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [currentEmotion, setCurrentEmotion] = useState<string>('neutral');
@@ -124,8 +124,6 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
   const lipSyncRef = useRef<LipSyncService | null>(null);
   const conversationRef = useRef<ConversationService | null>(null);
   const anthropicRef = useRef<Anthropic | null>(null);
-  const userToastRef = useRef<any>(null);
-  const speechToastRef = useRef<any>(null);
 
   // Track emotion snippets for cleanup (lip sync and prosodic are now handled by TTS service)
   const emotionSnippetsRef = useRef<string[]>([]);
@@ -140,38 +138,20 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
 
   // Update user speech toast (mirror French Quiz UX)
   const updateUserToast = (text: string, isFinal: boolean, isInterruption: boolean) => {
-    const title = isInterruption
-      ? isFinal
-        ? 'You (interrupting - final)'
-        : 'You (interrupting...)'
-      : isFinal
-      ? 'You (final)'
-      : 'You (listening...)';
-
+    // Only show final transcriptions to avoid spam
     if (isFinal) {
-      if (speechToastRef.current && toast.update) {
-        toast.update(speechToastRef.current, {
+      const title = isInterruption ? 'You (interrupting)' : 'You';
+      if (isInterruption) {
+        toaster.warning({
           title,
           description: text,
-          status: isInterruption ? 'warning' : 'success',
           duration: 2500,
-          isClosable: true,
         });
-      }
-      speechToastRef.current = null;
-    } else {
-      if (!speechToastRef.current) {
-        speechToastRef.current = toast({
+      } else {
+        toaster.success({
           title,
           description: text,
-          status: isInterruption ? 'warning' : 'info',
-          duration: null,
-          isClosable: false,
-        });
-      } else if (toast.update) {
-        toast.update(speechToastRef.current, {
-          title,
-          description: text,
+          duration: 2500,
         });
       }
     }
@@ -367,7 +347,7 @@ export default function AIChatApp({ animationManager, settings, toast }: AIChatA
       setTranscribedText(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animationManager, toast, eyeHeadTrackingService]);
+  }, [animationManager, toaster, eyeHeadTrackingService]);
 
   // Apply emotion via FACS
   const applyEmotion = (emotionKey: string) => {
@@ -512,12 +492,10 @@ Keep conversations fun, engaging, and emotionally authentic!`;
     } catch (error: any) {
       console.error('[AIChat] API call failed:', error);
 
-      toast({
+      toaster.error({
         title: 'API Error',
         description: error?.message || 'Failed to connect to Claude API. Please check your API key.',
-        status: 'error',
         duration: 5000,
-        isClosable: true,
       });
 
       throw new Error(`Claude API error: ${error?.message || 'Unknown error'}`);
@@ -579,10 +557,9 @@ Keep conversations fun, engaging, and emotionally authentic!`;
         dangerouslyAllowBrowser: true,
       });
       setIsConnected(true);
-      toast({
+      toaster.success({
         title: 'API Key Saved',
         description: 'Connected to Anthropic API',
-        status: 'success',
         duration: 2000,
       });
     }
@@ -590,10 +567,9 @@ Keep conversations fun, engaging, and emotionally authentic!`;
 
   const startConversation = () => {
     if (!isConnected) {
-      toast({
+      toaster.warning({
         title: 'Not Connected',
         description: 'Please enter your Anthropic API key first',
-        status: 'warning',
         duration: 3000,
       });
       return;

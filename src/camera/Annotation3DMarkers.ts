@@ -33,6 +33,10 @@ const ZOOMED_IN_SPHERE_SCALE = 0.25; // Spheres get much smaller (25%) when zoom
 const ZOOMED_IN_LABEL_SCALE = 0.85; // Labels stay readable - only slightly smaller
 const ZOOMED_IN_LINE_SCALE = 0.3; // Lines get much shorter when zoomed in
 
+// Marker separation settings - prevents overlapping labels
+const MARKER_SEPARATION_DISTANCE = 0.15; // Minimum distance between line endpoints (in model units)
+const MARKER_SEPARATION_ANGLE = 25; // Degrees to spread markers apart when too close
+
 /**
  * Pure 3D visual markers for annotations.
  *
@@ -111,6 +115,9 @@ export class Annotation3DMarkers {
     for (const annotation of config.annotations) {
       this.createMarker(annotation);
     }
+
+    // After all markers are created, separate any that are too close together
+    this.separateOverlappingMarkers();
   }
 
   setCurrentAnnotation(name: string | null): void {
@@ -165,19 +172,22 @@ export class Annotation3DMarkers {
     const scaledRadius = this.config.markerRadius * scale;
     const scaledLineLength = this.config.lineLength * scale;
 
-    // Create sphere at surface
+    // Create sphere at surface - render on top of model (no depth test)
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(scaledRadius, 12, 12),
       new THREE.MeshBasicMaterial({
         color: this.config.markerColor,
         transparent: true,
         opacity: 0.95,
+        depthTest: false,
+        depthWrite: false,
       })
     );
     sphere.position.copy(surfacePoint);
     sphere.name = `marker_${annotation.name}`;
     sphere.userData.annotation = annotation.name;
     sphere.userData.cameraAngle = annotation.cameraAngle;
+    sphere.renderOrder = 999; // Render on top
     this.markerGroup.add(sphere);
     this.markerMeshes.set(annotation.name, sphere);
 
@@ -193,17 +203,20 @@ export class Annotation3DMarkers {
       direction: outwardDir.clone(),
     });
 
-    // Create line
+    // Create line - render on top of model (no depth test)
     const line = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([surfacePoint.clone(), lineEnd]),
       new THREE.LineBasicMaterial({
         color: this.config.lineColor,
         transparent: true,
         opacity: 0.9,
+        depthTest: false,
+        depthWrite: false,
       })
     );
     line.name = `line_${annotation.name}`;
     line.userData.annotation = annotation.name;
+    line.renderOrder = 998; // Render on top, but below spheres
     this.markerGroup.add(line);
     this.lineMeshes.set(annotation.name, line);
 
@@ -217,6 +230,130 @@ export class Annotation3DMarkers {
     this.labelScales.set(annotation.name, { x: label.scale.x, y: label.scale.y });
 
     console.log(`[3DMarkers] ${annotation.name}: surface=(${surfacePoint.x.toFixed(3)}, ${surfacePoint.y.toFixed(3)}, ${surfacePoint.z.toFixed(3)}), outward=(${outwardDir.x.toFixed(2)}, ${outwardDir.y.toFixed(2)}, ${outwardDir.z.toFixed(2)})`);
+  }
+
+  /**
+   * Separate overlapping markers by adjusting their line directions.
+   * When two or more markers have line endpoints that are too close together,
+   * spread them apart at different angles while keeping them attached to the same surface points.
+   */
+  private separateOverlappingMarkers(): void {
+    const scale = this.modelSize.y / REFERENCE_MODEL_HEIGHT;
+    const minDistance = MARKER_SEPARATION_DISTANCE * scale;
+    const angleStep = (MARKER_SEPARATION_ANGLE * Math.PI) / 180;
+
+    // Get all marker names and their current line endpoints
+    const markerNames = Array.from(this.lineEndpoints.keys());
+
+    // Find groups of markers that are too close together
+    const processed = new Set<string>();
+
+    for (let i = 0; i < markerNames.length; i++) {
+      const nameA = markerNames[i];
+      if (processed.has(nameA)) continue;
+
+      const endpointsA = this.lineEndpoints.get(nameA)!;
+      const closeMarkers: string[] = [nameA];
+
+      // Find all markers close to this one
+      for (let j = i + 1; j < markerNames.length; j++) {
+        const nameB = markerNames[j];
+        if (processed.has(nameB)) continue;
+
+        const endpointsB = this.lineEndpoints.get(nameB)!;
+
+        // Check if line endpoints are too close
+        const endpointDist = endpointsA.end.distanceTo(endpointsB.end);
+        // Also check if surface points (line starts) are close - indicates nearby annotations
+        const startDist = endpointsA.start.distanceTo(endpointsB.start);
+
+        if (endpointDist < minDistance || startDist < minDistance * 0.5) {
+          closeMarkers.push(nameB);
+        }
+      }
+
+      // If multiple markers are close together, spread them out
+      if (closeMarkers.length > 1) {
+        console.log(`[3DMarkers] Separating ${closeMarkers.length} close markers: ${closeMarkers.join(', ')}`);
+        this.spreadMarkersApart(closeMarkers, angleStep);
+        closeMarkers.forEach((name) => processed.add(name));
+      }
+    }
+  }
+
+  /**
+   * Spread a group of close markers apart by rotating their line directions.
+   */
+  private spreadMarkersApart(markerNames: string[], angleStep: number): void {
+    const count = markerNames.length;
+
+    // Calculate the center point of all markers in this group
+    const groupCenter = new THREE.Vector3();
+    for (const name of markerNames) {
+      const endpoints = this.lineEndpoints.get(name);
+      if (endpoints) {
+        groupCenter.add(endpoints.start);
+      }
+    }
+    groupCenter.divideScalar(count);
+
+    // Calculate average direction from model center to group center
+    const avgDirection = new THREE.Vector3().subVectors(groupCenter, this.modelCenter).normalize();
+
+    // Spread markers evenly around this average direction
+    // Use both horizontal and vertical offsets for better separation
+    for (let i = 0; i < count; i++) {
+      const name = markerNames[i];
+      const endpoints = this.lineEndpoints.get(name);
+      const line = this.lineMeshes.get(name);
+      const label = this.labelSprites.get(name);
+
+      if (!endpoints || !line || !label) continue;
+
+      // Calculate angle offset: spread evenly from -(count-1)/2 to +(count-1)/2
+      const offsetIndex = i - (count - 1) / 2;
+
+      // Create rotation axis perpendicular to the average direction
+      // Use a mix of up and right vectors for more natural spreading
+      const up = new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(avgDirection, up).normalize();
+
+      // Alternate between horizontal and vertical offsets for varied separation
+      const isEven = i % 2 === 0;
+      const rotationAxis = isEven ? up : right;
+
+      // Rotate the original direction around the axis
+      const newDirection = endpoints.direction.clone();
+      newDirection.applyAxisAngle(rotationAxis, offsetIndex * angleStep);
+
+      // Also add some vertical spread if there are many markers
+      if (count > 2) {
+        const verticalOffset = (i / (count - 1) - 0.5) * angleStep * 0.5;
+        newDirection.applyAxisAngle(right, verticalOffset);
+      }
+
+      newDirection.normalize();
+
+      // Calculate new line end point
+      const lineLength = endpoints.start.distanceTo(endpoints.end);
+      const newEnd = endpoints.start.clone().add(
+        newDirection.clone().multiplyScalar(lineLength)
+      );
+
+      // Update stored endpoints
+      endpoints.direction.copy(newDirection);
+      endpoints.end.copy(newEnd);
+
+      // Update line geometry
+      const positions = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+      positions.setXYZ(1, newEnd.x, newEnd.y, newEnd.z);
+      positions.needsUpdate = true;
+
+      // Move label to new line end
+      label.position.copy(newEnd);
+
+      console.log(`[3DMarkers] Spread ${name}: angle offset ${(offsetIndex * angleStep * 180 / Math.PI).toFixed(1)}°`);
+    }
   }
 
   /**
@@ -505,7 +642,7 @@ export class Annotation3DMarkers {
       new THREE.SpriteMaterial({
         map: texture,
         transparent: true,
-        depthTest: true,
+        depthTest: false, // Render on top of model
         depthWrite: false,
         sizeAttenuation: false, // Disable size attenuation - we'll scale manually for consistent screen size
       })
@@ -516,6 +653,9 @@ export class Annotation3DMarkers {
     const baseScale = 0.024; // Fixed screen-relative size
     const aspect = canvas.width / canvas.height;
     sprite.scale.set(baseScale * aspect, baseScale, 1);
+
+    // Render on top of everything
+    sprite.renderOrder = 1000;
 
     return sprite;
   }

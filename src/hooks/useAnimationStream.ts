@@ -20,10 +20,16 @@ import {
   snippetTime$,
   snippetList$,
   globalPlaybackState$,
+  bakedClipList$,
+  playingBakedAnimations$,
+  bakedAnimationState$,
+  bakedAnimationProgress$,
 } from '../latticework/animation/animationService';
 import type {
   AnimationEvent,
   SnippetUIState,
+  BakedClipInfo,
+  BakedAnimationUIState,
 } from '../latticework/animation/animationEvents';
 
 // ============ Hook: Snippet list only ============
@@ -164,4 +170,78 @@ export function useSnippets(): SnippetUIState[] {
   }, []);
 
   return snippets;
+}
+
+// ============ Baked Animation Hooks ============
+
+/**
+ * Subscribe to the list of available baked animation clips.
+ * Updates when clips are loaded from a model.
+ */
+export function useBakedClips(): BakedClipInfo[] {
+  const [clips, setClips] = useState<BakedClipInfo[]>(() =>
+    animationEventEmitter.getBakedClips()
+  );
+
+  useEffect(() => {
+    const sub = bakedClipList$.subscribe(setClips);
+    return () => sub.unsubscribe();
+  }, []);
+
+  return clips;
+}
+
+/**
+ * Subscribe to the list of currently playing baked animations.
+ * Updates on play/pause/stop/progress events.
+ */
+export function usePlayingBakedAnimations(): BakedAnimationUIState[] {
+  const [animations, setAnimations] = useState<BakedAnimationUIState[]>(() =>
+    animationEventEmitter.getPlayingBakedAnimations()
+  );
+
+  useEffect(() => {
+    const sub = playingBakedAnimations$.subscribe(setAnimations);
+    return () => sub.unsubscribe();
+  }, []);
+
+  return animations;
+}
+
+/**
+ * Subscribe to a single baked animation's state.
+ * Optimal for individual animation controls.
+ */
+export function useBakedAnimationState(clipName: string): BakedAnimationUIState | null {
+  const [state, setState] = useState<BakedAnimationUIState | null>(() =>
+    animationEventEmitter.getBakedAnimationState(clipName)
+  );
+
+  useEffect(() => {
+    const sub = bakedAnimationState$(clipName).subscribe(setState);
+    return () => sub.unsubscribe();
+  }, [clipName]);
+
+  return state;
+}
+
+/**
+ * Subscribe to a baked animation's progress with throttling.
+ * Prevents UI jitter during playback.
+ */
+export function useBakedAnimationProgress(
+  clipName: string,
+  throttleMs = 100
+): { time: number; duration: number } {
+  const [progress, setProgress] = useState<{ time: number; duration: number }>(() => {
+    const state = animationEventEmitter.getBakedAnimationState(clipName);
+    return { time: state?.time ?? 0, duration: state?.duration ?? 0 };
+  });
+
+  useEffect(() => {
+    const sub = bakedAnimationProgress$(clipName, throttleMs).subscribe(setProgress);
+    return () => sub.unsubscribe();
+  }, [clipName, throttleMs]);
+
+  return progress;
 }

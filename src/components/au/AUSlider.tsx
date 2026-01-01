@@ -76,7 +76,9 @@ const AUSlider: React.FC<AUSliderProps> = ({
   const auId = typeof au === 'number' ? au : parseInt(String(au).replace(/[^\d]/g, ''));
   const auIdStr = String(au);
   const hasMixedAU = isMixedAU(auId);
-  const isBilateralAU = hasLeftRightMorphs(auId);
+  // Check for bilateral AU: either L/R morphs (human) or L/R bones (fish/skeletal models)
+  // Use engine.hasLeftRightBones() which checks the current config's composite rotations
+  const isBilateralAU = hasLeftRightMorphs(auId) || (engine?.hasLeftRightBones(auId) ?? false);
 
   // Fetch Wikipedia images for muscle info
   useEffect(() => {

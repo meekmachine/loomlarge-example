@@ -81,6 +81,82 @@ export interface SnippetSeekedEvent extends AnimationEventBase {
   time: number;
 }
 
+// ============ Baked Animation Event Types ============
+
+/** State of a baked animation (from GLB/GLTF file) */
+export interface BakedAnimationUIState {
+  name: string;
+  time: number;
+  duration: number;
+  speed: number;
+  weight: number;
+  isPlaying: boolean;
+  isPaused: boolean;
+  loop: boolean;
+}
+
+/** Info about an available baked animation clip */
+export interface BakedClipInfo {
+  name: string;
+  duration: number;
+}
+
+/** Emitted when baked animation clips are loaded from a model */
+export interface BakedClipsLoadedEvent extends AnimationEventBase {
+  type: 'BAKED_CLIPS_LOADED';
+  clips: BakedClipInfo[];
+}
+
+/** Emitted when a baked animation starts playing */
+export interface BakedAnimationStartedEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_STARTED';
+  clipName: string;
+  state: BakedAnimationUIState;
+}
+
+/** Emitted when a baked animation is stopped */
+export interface BakedAnimationStoppedEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_STOPPED';
+  clipName: string;
+}
+
+/** Emitted when a baked animation is paused */
+export interface BakedAnimationPausedEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_PAUSED';
+  clipName: string;
+}
+
+/** Emitted when a baked animation is resumed */
+export interface BakedAnimationResumedEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_RESUMED';
+  clipName: string;
+}
+
+/** Emitted when a baked animation completes (non-looping) */
+export interface BakedAnimationCompletedEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_COMPLETED';
+  clipName: string;
+}
+
+/** Emitted periodically with baked animation progress (throttled) */
+export interface BakedAnimationProgressEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_PROGRESS';
+  clipName: string;
+  time: number;
+  duration: number;
+}
+
+/** Emitted when baked animation parameters change (speed, weight) */
+export interface BakedAnimationParamsChangedEvent extends AnimationEventBase {
+  type: 'BAKED_ANIMATION_PARAMS_CHANGED';
+  clipName: string;
+  params: {
+    speed?: number;
+    weight?: number;
+    loop?: boolean;
+  };
+}
+
 /** Union type of all animation events */
 export type AnimationEvent =
   | SnippetAddedEvent
@@ -91,7 +167,15 @@ export type AnimationEvent =
   | KeyframeCompletedEvent
   | SnippetParamsChangedEvent
   | GlobalPlaybackChangedEvent
-  | SnippetSeekedEvent;
+  | SnippetSeekedEvent
+  | BakedClipsLoadedEvent
+  | BakedAnimationStartedEvent
+  | BakedAnimationStoppedEvent
+  | BakedAnimationPausedEvent
+  | BakedAnimationResumedEvent
+  | BakedAnimationCompletedEvent
+  | BakedAnimationProgressEvent
+  | BakedAnimationParamsChangedEvent;
 
 // ============ State Snapshot Types ============
 

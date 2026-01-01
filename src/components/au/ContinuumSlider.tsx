@@ -59,7 +59,8 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
   const continuumKey = `${negId}-${posId}`;
   const headerLabel = CONTINUUM_LABELS[continuumKey] ?? `AU ${negId} ↔ AU ${posId}`;
 
-  // Handle slider change - use setContinuum for proper paired AU handling
+  // Handle slider change - use setAU with negative values for continuum pairs
+  // The engine automatically detects continuum pairs and activates the opposite AU
   const handleSliderChange = (details: { value: number[] }) => {
     const val = details.value[0];
     setValue(val);
@@ -69,8 +70,11 @@ const ContinuumSlider: React.FC<ContinuumSliderProps> = ({
 
     if (!engine) return;
 
-    // Use setContinuum which properly zeros the inactive AU in the pair
-    engine.setContinuum(negId, posId, val);
+    // New approach: use setAU with negative values
+    // Negative value on negId activates posId, positive value activates negId
+    // e.g., setAU(51, -0.5) activates AU 52 at 0.5 (head right)
+    //       setAU(51, 0.5) activates AU 51 at 0.5 (head left)
+    engine.setAU(negId, -val);
   };
 
   // Determine which AU is the "base" for mix weight using CONTINUUM_PAIRS_MAP

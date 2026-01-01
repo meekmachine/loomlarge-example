@@ -1,6 +1,6 @@
 import type { Snippet, HostCaps, ScheduleOpts } from './types';
-import type { TransitionHandle } from 'loomlarge';
-import { VISEME_KEYS, COMPOSITE_ROTATIONS } from 'loomlarge';
+import type { TransitionHandle, ClipHandle } from 'loomlarge';
+import { VISEME_KEYS } from 'loomlarge';
 import { animationEventEmitter } from './animationService';
 
 type RuntimeSched = { name: string; startsAt: number; offset: number; enabled: boolean };
@@ -14,8 +14,10 @@ type PlaybackRunner = {
   snippetName: string;
   /** Set to false to stop the playback loop */
   active: boolean;
-  /** Currently active TransitionHandles (for pause/resume) */
+  /** Currently active TransitionHandles (for pause/resume) - used in legacy mode */
   handles: TransitionHandle[];
+  /** ClipHandle when using buildClip() - preferred path */
+  clipHandle?: ClipHandle;
   /** Promise that resolves when the runner completes or is stopped */
   promise: Promise<void>;
 };
@@ -176,14 +178,18 @@ export class AnimationScheduler {
 
   /**
    * Start an async playback runner for a snippet.
-   * The runner fires transitions at keyframe boundaries and awaits their promises.
+   * Prefers buildClip() when available (entire clip built upfront, mixer handles interpolation).
+   * Falls back to keyframe-by-keyframe transitions for backwards compatibility.
    */
   private startPlaybackRunner(snippetName: string) {
     // Stop any existing runner for this snippet
     this.stopPlaybackRunner(snippetName);
 
-    // Create runner and add to map BEFORE starting the async loop
-    // This ensures runPlaybackLoop can find the runner when it starts
+    // Get snippet from machine context
+    const sn = this.getSnippetByName(snippetName);
+    if (!sn || !sn.curves) return;
+
+    // Create runner and add to map
     const runner: PlaybackRunner = {
       snippetName,
       active: true,
@@ -193,20 +199,179 @@ export class AnimationScheduler {
 
     this.playbackRunners.set(snippetName, runner);
 
-    // NOW start the async loop (runner is already in map)
-    runner.promise = this.runPlaybackLoop(snippetName);
+    // PREFERRED PATH: Use buildClip() if available
+    // This builds the entire clip upfront and lets Three.js mixer handle interpolation
+    if (this.host.buildClip) {
+      console.log(`[Scheduler] ✓ Using buildClip() for "${snippetName}" (${Object.keys(sn.curves).length} curves)`);
+      runner.promise = this.runClipBasedPlayback(snippetName, runner);
+    } else {
+      // LEGACY PATH: Keyframe-by-keyframe transitions
+      console.log(`[Scheduler] ⚠ Using LEGACY keyframe transitions for "${snippetName}" (buildClip not available)`);
+      runner.promise = this.runPlaybackLoop(snippetName);
+    }
+  }
+
+  /**
+   * Get a snippet from the machine context by name.
+   */
+  private getSnippetByName(snippetName: string): (Snippet & { curves: Record<string, SchedulerCurvePoint[]> }) | null {
+    try {
+      const st = this.machine.getSnapshot?.();
+      const arr = st?.context?.animations as any[] || [];
+      return arr.find((s: any) => s?.name === snippetName) ?? null;
+    } catch { return null; }
+  }
+
+  /**
+   * Run clip-based playback using buildClip().
+   * Builds entire clip upfront and lets Three.js mixer handle all interpolation.
+   */
+  private async runClipBasedPlayback(snippetName: string, runner: PlaybackRunner): Promise<void> {
+    let loopIteration = 0;
+
+    // Main playback loop (handles looping)
+    while (runner.active) {
+      const sn = this.getSnippetByName(snippetName);
+      if (!sn || !sn.curves) break;
+
+      const curves = sn.curves as Record<string, SchedulerCurvePoint[]>;
+      const rate = sn.snippetPlaybackRate ?? 1;
+      const scale = sn.snippetIntensityScale ?? 1;
+      const balance = (sn as any).snippetBalance ?? 0;
+      const jawScale = (sn as any).snippetJawScale ?? 1.0;
+      const loop = !!sn.loop;
+      const duration = this.totalDuration(sn);
+
+      // Apply continuity: reseed inherited keyframes with current values
+      this.reseedInheritedKeyframes(sn);
+
+      // Convert curves to format expected by buildClip()
+      // buildClip expects: Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>>
+      const clipCurves: Record<string, Array<{ time: number; intensity: number; inherit?: boolean }>> = {};
+      for (const [curveId, arr] of Object.entries(curves)) {
+        clipCurves[curveId] = arr.map(kf => ({
+          time: kf.time,
+          intensity: kf.intensity,
+          inherit: kf.inherit,
+        }));
+      }
+
+      // Build and play the clip
+      const clipHandle = this.host.buildClip!(
+        `${snippetName}_${loopIteration}`,
+        clipCurves,
+        {
+          loop: false, // We handle looping ourselves for event emission
+          playbackRate: rate,
+          balance,
+          jawScale,
+          intensityScale: scale,
+        }
+      );
+
+      if (!clipHandle) {
+        console.warn(`[Scheduler] buildClip() returned null for "${snippetName}"`);
+        break;
+      }
+
+      runner.clipHandle = clipHandle;
+      console.log(`[Scheduler] ▶ Playing clip "${clipHandle.clipName}" (duration: ${clipHandle.getDuration().toFixed(2)}s, rate: ${rate}, loop: ${loop})`);
+
+      // Start playback
+      clipHandle.play();
+
+      // Emit progress events periodically while clip plays
+      const progressInterval = setInterval(() => {
+        if (!runner.active || !runner.clipHandle) {
+          clearInterval(progressInterval);
+          return;
+        }
+        const currentTime = clipHandle.getTime();
+        const clipDuration = clipHandle.getDuration();
+
+        // Update snippet's currentTime in machine context
+        const snUpdate = this.getSnippetByName(snippetName);
+        if (snUpdate) {
+          (snUpdate as any).currentTime = currentTime;
+        }
+
+        // Track current values for continuity
+        for (const [curveId, arr] of Object.entries(curves)) {
+          const value = sampleAt(arr, currentTime);
+          this.currentValues.set(curveId, clamp01(applyIntensityScale(value, scale)));
+        }
+
+        animationEventEmitter.emitKeyframeCompleted({
+          snippetName,
+          keyframeIndex: -1, // N/A for clip-based playback
+          totalKeyframes: -1,
+          currentTime,
+          duration: clipDuration,
+        });
+      }, 50); // Update every 50ms
+
+      // Wait for clip to finish
+      try {
+        await clipHandle.finished;
+      } catch {
+        // Clip was stopped/cancelled
+      }
+
+      clearInterval(progressInterval);
+      runner.clipHandle = undefined;
+
+      // Check if still active after clip finished
+      if (!runner.active) break;
+
+      // Check if we should loop
+      const snCheck = this.getSnippetByName(snippetName);
+      if (!snCheck?.loop) {
+        // Non-looping snippet completed
+        console.log(`[Scheduler] ✓ Clip "${snippetName}" completed (non-looping)`);
+        this.ended.add(snippetName);
+        if (snCheck) (snCheck as any).isPlaying = false;
+        animationEventEmitter.emitSnippetCompleted(snippetName);
+        try { this.host.onSnippetEnd?.(snippetName); } catch {}
+        break;
+      }
+
+      // Looping - increment and continue
+      loopIteration++;
+      console.log(`[Scheduler] ↻ Clip "${snippetName}" looping (iteration ${loopIteration})`);
+      animationEventEmitter.emitSnippetLooped({
+        snippetName,
+        iteration: loopIteration,
+        localTime: 0,
+      });
+      this.safeSend({
+        type: 'SNIPPET_LOOPED',
+        name: snippetName,
+        iteration: loopIteration,
+        localTime: 0
+      });
+    }
+
+    // Cleanup
+    this.playbackRunners.delete(snippetName);
   }
 
   /**
    * Stop the playback runner for a snippet.
-   * Cancels all active transitions and marks the runner as inactive.
+   * Cancels all active transitions/clips and marks the runner as inactive.
    */
   private stopPlaybackRunner(snippetName: string) {
     const runner = this.playbackRunners.get(snippetName);
     if (!runner) return;
 
     runner.active = false;
-    // Cancel all active handles
+
+    // Stop clip if using buildClip() path
+    if (runner.clipHandle) {
+      try { runner.clipHandle.stop(); } catch {}
+      runner.clipHandle = undefined;
+    }
+
+    // Cancel all active transition handles (legacy path)
     for (const handle of runner.handles) {
       try { handle.cancel(); } catch {}
     }
@@ -216,12 +381,18 @@ export class AnimationScheduler {
 
   /**
    * Pause the playback runner for a snippet.
-   * Pauses all active TransitionHandles.
+   * Pauses clip or TransitionHandles depending on playback mode.
    */
   private pausePlaybackRunner(snippetName: string) {
     const runner = this.playbackRunners.get(snippetName);
     if (!runner) return;
 
+    // Pause clip if using buildClip() path
+    if (runner.clipHandle) {
+      try { runner.clipHandle.pause(); } catch {}
+    }
+
+    // Pause transition handles (legacy path)
     for (const handle of runner.handles) {
       try { handle.pause(); } catch {}
     }
@@ -229,12 +400,18 @@ export class AnimationScheduler {
 
   /**
    * Resume the playback runner for a snippet.
-   * Resumes all active TransitionHandles.
+   * Resumes clip or TransitionHandles depending on playback mode.
    */
   private resumePlaybackRunner(snippetName: string) {
     const runner = this.playbackRunners.get(snippetName);
     if (!runner) return;
 
+    // Resume clip if using buildClip() path
+    if (runner.clipHandle) {
+      try { runner.clipHandle.resume(); } catch {}
+    }
+
+    // Resume transition handles (legacy path)
     for (const handle of runner.handles) {
       try { handle.resume(); } catch {}
     }
@@ -566,8 +743,11 @@ export class AnimationScheduler {
     const processedAUs = new Set<string>();
     const processedContinuums = new Set<string>(); // Track which continuum pairs we've already processed
 
-    // Process each composite rotation definition from shapeDict
-    for (const composite of COMPOSITE_ROTATIONS) {
+    // Get composite rotations dynamically from the host (engine) for the current character
+    const compositeRotations = this.host.getCompositeRotations?.() ?? [];
+
+    // Process each composite rotation definition for the current character
+    for (const composite of compositeRotations) {
       const { pitch, yaw, roll } = composite;
 
       // Process each axis (pitch, yaw, roll) for this node

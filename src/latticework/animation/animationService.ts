@@ -2,13 +2,19 @@ import { createActor, type Actor } from 'xstate';
 import { Subject, Observable } from 'rxjs';
 import { filter, map, distinctUntilChanged, throttleTime, shareReplay } from 'rxjs/operators';
 import { animationMachine } from './animationMachine';
-import type { HostCaps, ScheduleOpts, NormalizedSnippet } from './types';
+import type { HostCaps, ScheduleOpts, NormalizedSnippet, BakedAnimationEngine } from './types';
 import { AnimationScheduler as Scheduler } from './animationScheduler';
 import type {
   AnimationEvent,
   SnippetUIState,
   KeyframeCompletedEvent,
   GlobalPlaybackChangedEvent,
+  BakedClipInfo,
+  BakedAnimationUIState,
+  BakedClipsLoadedEvent,
+  BakedAnimationStartedEvent,
+  BakedAnimationStoppedEvent,
+  BakedAnimationProgressEvent,
 } from './animationEvents';
 
 /**
@@ -44,6 +50,10 @@ export function createAnimationService(host: HostCaps) {
   });
 
   let disposed = false;
+
+  // Baked animation engine state (closure variables)
+  let bakedEngine: BakedAnimationEngine | null = null;
+  let bakedProgressInterval: ReturnType<typeof setInterval> | null = null;
 
   const api = {
     // --- XState Actor (for useSelector in React components) ---
@@ -227,6 +237,11 @@ export function createAnimationService(host: HostCaps) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      if (bakedProgressInterval) {
+        clearInterval(bakedProgressInterval);
+        bakedProgressInterval = null;
+      }
+      bakedEngine = null;
       try { scheduler.dispose(); } catch {}
       try { actor.stop(); } catch {}
     },
@@ -242,7 +257,115 @@ export function createAnimationService(host: HostCaps) {
       anims.forEach((a: any, i: number) => {
         console.log(`    [${i}] ${a.name}: isPlaying=${a.isPlaying}, duration=${a.duration}, curves=${Object.keys(a.curves || {}).length}`);
       });
-    }
+    },
+
+    // --- Baked Animation Controls ---
+    setBakedAnimationEngine(engine: BakedAnimationEngine) {
+      console.log('[AnimService:Baked] setBakedAnimationEngine called - wiring up to engine');
+      bakedEngine = engine;
+      // Load clips and emit event
+      const clips = engine.getAnimationClips?.() || [];
+      console.log(`[AnimService:Baked] Found ${clips.length} clips:`, clips.map(c => c.name));
+      animationEventEmitter.emitBakedClipsLoaded(clips.map(c => ({ name: c.name, duration: c.duration })));
+
+      // Start progress polling for baked animations (every 100ms when playing)
+      if (bakedProgressInterval) {
+        clearInterval(bakedProgressInterval);
+      }
+      bakedProgressInterval = setInterval(() => {
+        if (!bakedEngine) return;
+        const playing = bakedEngine.getPlayingAnimations?.() || [];
+        for (const anim of playing) {
+          // Update internal state and emit progress
+          animationEventEmitter.updateBakedAnimationState(anim.name, {
+            name: anim.name,
+            time: anim.time,
+            duration: anim.duration,
+            speed: anim.speed,
+            weight: anim.weight,
+            isPlaying: anim.isPlaying,
+            isPaused: anim.isPaused,
+            loop: anim.loop,
+          });
+          animationEventEmitter.emitBakedAnimationProgress(anim.name, anim.time, anim.duration);
+        }
+      }, 100);
+    },
+
+    playBakedAnimation(clipName: string, options?: { loop?: boolean; speed?: number; weight?: number }) {
+      console.log(`[AnimService:Baked] playBakedAnimation("${clipName}")`, options);
+      if (!bakedEngine) {
+        console.warn('[AnimService:Baked] No engine set - cannot play');
+        return null;
+      }
+      const handle = bakedEngine.playAnimation?.(clipName, options);
+      if (handle) {
+        const state = handle.getState();
+        console.log(`[AnimService:Baked] Animation started - mixer will handle playback`);
+        animationEventEmitter.emitBakedAnimationStarted(clipName, {
+          name: state.name,
+          time: state.time,
+          duration: state.duration,
+          speed: state.speed,
+          weight: state.weight,
+          isPlaying: state.isPlaying,
+          isPaused: state.isPaused,
+          loop: state.loop,
+        });
+        // Track completion
+        handle.finished.then(() => {
+          console.log(`[AnimService:Baked] Animation "${clipName}" completed`);
+          animationEventEmitter.emitBakedAnimationCompleted(clipName);
+        }).catch(() => {
+          // Animation might be stopped before completion
+        });
+      }
+      return handle;
+    },
+
+    stopBakedAnimation(clipName: string) {
+      console.log(`[AnimService:Baked] stopBakedAnimation("${clipName}")`);
+      bakedEngine?.stopAnimation?.(clipName);
+      animationEventEmitter.emitBakedAnimationStopped(clipName);
+    },
+
+    pauseBakedAnimation(clipName: string) {
+      bakedEngine?.pauseAnimation?.(clipName);
+      animationEventEmitter.emitBakedAnimationPaused(clipName);
+    },
+
+    resumeBakedAnimation(clipName: string) {
+      bakedEngine?.resumeAnimation?.(clipName);
+      animationEventEmitter.emitBakedAnimationResumed(clipName);
+    },
+
+    setBakedAnimationSpeed(clipName: string, speed: number) {
+      bakedEngine?.setAnimationSpeed?.(clipName, speed);
+      animationEventEmitter.emitBakedAnimationParamsChanged(clipName, { speed });
+    },
+
+    setBakedAnimationWeight(clipName: string, weight: number) {
+      bakedEngine?.setAnimationIntensity?.(clipName, weight);
+      animationEventEmitter.emitBakedAnimationParamsChanged(clipName, { weight });
+    },
+
+    stopAllBakedAnimations() {
+      if (!bakedEngine) return;
+      const playing = animationEventEmitter.getPlayingBakedAnimations();
+      bakedEngine.stopAllAnimations?.();
+      // Emit stopped for each
+      for (const anim of playing) {
+        animationEventEmitter.emitBakedAnimationStopped(anim.name);
+      }
+    },
+
+    getBakedClips() {
+      return animationEventEmitter.getBakedClips();
+    },
+
+    getPlayingBakedAnimations() {
+      return animationEventEmitter.getPlayingBakedAnimations();
+    },
   } as const;
 
   // Helper to get snippet from machine context
@@ -297,6 +420,10 @@ class AnimationEventEmitter {
   private event$ = new Subject<AnimationEvent>();
   private _getSnippets: (() => NormalizedSnippet[]) | null = null;
   private _globalState: 'playing' | 'paused' | 'stopped' = 'stopped';
+
+  // Baked animation state storage
+  private _bakedClips: BakedClipInfo[] = [];
+  private _playingBakedAnimations = new Map<string, BakedAnimationUIState>();
 
   /** Observable stream of discrete animation events */
   get events(): Observable<AnimationEvent> {
@@ -420,6 +547,123 @@ class AnimationEventEmitter {
       timestamp: this.now(),
     });
   }
+
+  // ============ Baked Animation Event Emitters ============
+
+  emitBakedClipsLoaded(clips: BakedClipInfo[]) {
+    this._bakedClips = clips;
+    this.event$.next({
+      type: 'BAKED_CLIPS_LOADED',
+      clips,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationStarted(clipName: string, state: BakedAnimationUIState) {
+    this._playingBakedAnimations.set(clipName, state);
+    this.event$.next({
+      type: 'BAKED_ANIMATION_STARTED',
+      clipName,
+      state,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationStopped(clipName: string) {
+    this._playingBakedAnimations.delete(clipName);
+    this.event$.next({
+      type: 'BAKED_ANIMATION_STOPPED',
+      clipName,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationPaused(clipName: string) {
+    const state = this._playingBakedAnimations.get(clipName);
+    if (state) {
+      state.isPaused = true;
+      state.isPlaying = false;
+    }
+    this.event$.next({
+      type: 'BAKED_ANIMATION_PAUSED',
+      clipName,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationResumed(clipName: string) {
+    const state = this._playingBakedAnimations.get(clipName);
+    if (state) {
+      state.isPaused = false;
+      state.isPlaying = true;
+    }
+    this.event$.next({
+      type: 'BAKED_ANIMATION_RESUMED',
+      clipName,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationCompleted(clipName: string) {
+    this._playingBakedAnimations.delete(clipName);
+    this.event$.next({
+      type: 'BAKED_ANIMATION_COMPLETED',
+      clipName,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationProgress(clipName: string, time: number, duration: number) {
+    const state = this._playingBakedAnimations.get(clipName);
+    if (state) {
+      state.time = time;
+      state.duration = duration;
+    }
+    this.event$.next({
+      type: 'BAKED_ANIMATION_PROGRESS',
+      clipName,
+      time,
+      duration,
+      timestamp: this.now(),
+    });
+  }
+
+  emitBakedAnimationParamsChanged(clipName: string, params: {
+    speed?: number;
+    weight?: number;
+    loop?: boolean;
+  }) {
+    const state = this._playingBakedAnimations.get(clipName);
+    if (state) {
+      if (params.speed !== undefined) state.speed = params.speed;
+      if (params.weight !== undefined) state.weight = params.weight;
+      if (params.loop !== undefined) state.loop = params.loop;
+    }
+    this.event$.next({
+      type: 'BAKED_ANIMATION_PARAMS_CHANGED',
+      clipName,
+      params,
+      timestamp: this.now(),
+    });
+  }
+
+  // ============ Baked Animation State Getters ============
+
+  getBakedClips(): BakedClipInfo[] {
+    return this._bakedClips;
+  }
+
+  getPlayingBakedAnimations(): BakedAnimationUIState[] {
+    return Array.from(this._playingBakedAnimations.values());
+  }
+
+  getBakedAnimationState(clipName: string): BakedAnimationUIState | null {
+    return this._playingBakedAnimations.get(clipName) ?? null;
+  }
+
+  updateBakedAnimationState(clipName: string, state: BakedAnimationUIState) {
+    this._playingBakedAnimations.set(clipName, state);
+  }
 }
 
 // Singleton instance - shared by scheduler and service
@@ -495,3 +739,93 @@ export const globalPlaybackState$: Observable<'playing' | 'paused' | 'stopped'> 
     distinctUntilChanged(),
     shareReplay(1)
   );
+
+// ============================================================================
+// Baked Animation Observables
+// ============================================================================
+
+/**
+ * Observable of baked clip list changes.
+ * Emits when clips are loaded from a model.
+ */
+export const bakedClipList$: Observable<BakedClipInfo[]> = animationEventEmitter.events.pipe(
+  filter((e): e is BakedClipsLoadedEvent => e.type === 'BAKED_CLIPS_LOADED'),
+  map(e => e.clips),
+  shareReplay(1)
+);
+
+/**
+ * Observable of playing baked animations list.
+ * Updates on start/stop/pause/resume/complete events.
+ */
+export const playingBakedAnimations$: Observable<BakedAnimationUIState[]> =
+  animationEventEmitter.events.pipe(
+    filter(e =>
+      e.type === 'BAKED_ANIMATION_STARTED' ||
+      e.type === 'BAKED_ANIMATION_STOPPED' ||
+      e.type === 'BAKED_ANIMATION_PAUSED' ||
+      e.type === 'BAKED_ANIMATION_RESUMED' ||
+      e.type === 'BAKED_ANIMATION_COMPLETED' ||
+      e.type === 'BAKED_ANIMATION_PROGRESS' ||
+      e.type === 'BAKED_ANIMATION_PARAMS_CHANGED'
+    ),
+    map(() => animationEventEmitter.getPlayingBakedAnimations()),
+    distinctUntilChanged((a, b) => {
+      if (a.length !== b.length) return false;
+      // Shallow comparison of animation states
+      for (let i = 0; i < a.length; i++) {
+        if (a[i].name !== b[i].name) return false;
+        if (Math.abs(a[i].time - b[i].time) > 0.05) return false;
+        if (a[i].isPlaying !== b[i].isPlaying) return false;
+        if (a[i].isPaused !== b[i].isPaused) return false;
+      }
+      return true;
+    }),
+    shareReplay(1)
+  );
+
+/**
+ * Factory for per-baked-animation state observables.
+ * Listens to events that affect a specific baked animation.
+ */
+export function bakedAnimationState$(clipName: string): Observable<BakedAnimationUIState | null> {
+  return animationEventEmitter.events.pipe(
+    filter(e => {
+      if (e.type === 'BAKED_ANIMATION_STARTED' && e.clipName === clipName) return true;
+      if (e.type === 'BAKED_ANIMATION_STOPPED' && e.clipName === clipName) return true;
+      if (e.type === 'BAKED_ANIMATION_PAUSED' && e.clipName === clipName) return true;
+      if (e.type === 'BAKED_ANIMATION_RESUMED' && e.clipName === clipName) return true;
+      if (e.type === 'BAKED_ANIMATION_COMPLETED' && e.clipName === clipName) return true;
+      if (e.type === 'BAKED_ANIMATION_PROGRESS' && e.clipName === clipName) return true;
+      if (e.type === 'BAKED_ANIMATION_PARAMS_CHANGED' && e.clipName === clipName) return true;
+      return false;
+    }),
+    map(() => animationEventEmitter.getBakedAnimationState(clipName)),
+    distinctUntilChanged((a, b) => {
+      if (!a || !b) return a === b;
+      return (
+        a.isPlaying === b.isPlaying &&
+        a.isPaused === b.isPaused &&
+        Math.abs(a.time - b.time) < 0.05 &&
+        a.speed === b.speed &&
+        a.weight === b.weight
+      );
+    }),
+    shareReplay(1)
+  );
+}
+
+/**
+ * Throttled progress updates for a specific baked animation.
+ */
+export function bakedAnimationProgress$(clipName: string, throttleMs = 100): Observable<{ time: number; duration: number }> {
+  return animationEventEmitter.events.pipe(
+    filter((e): e is BakedAnimationProgressEvent =>
+      e.type === 'BAKED_ANIMATION_PROGRESS' && e.clipName === clipName
+    ),
+    map(e => ({ time: e.time, duration: e.duration })),
+    throttleTime(throttleMs, undefined, { leading: true, trailing: true }),
+    distinctUntilChanged((a, b) => Math.abs(a.time - b.time) < 0.05),
+    shareReplay(1)
+  );
+}

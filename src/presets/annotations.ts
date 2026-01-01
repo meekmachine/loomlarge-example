@@ -145,6 +145,7 @@ export const BETTA_FISH_ANNOTATIONS: CharacterAnnotationConfig = {
     },
     {
       name: 'dorsal_fin',
+      // Note: Dorsal bones may be at origin in world space - annotation system should use skinned position
       bones: ['Bone006_Armature', 'Bone007_Armature', 'Bone008_Armature'],
       paddingFactor: 1.8,
     },

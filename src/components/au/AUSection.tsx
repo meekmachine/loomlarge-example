@@ -6,13 +6,14 @@ import DockableAccordionItem from './DockableAccordionItem';
 import AUSlider from './AUSlider';
 import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
-import { AUInfo, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS, LoomLargeThree } from 'loomlarge';
+import type { AUInfo, LoomLargeThree } from 'loomlarge';
 
-// Build CONTINUUM_PAIRS from CONTINUUM_PAIRS_MAP
-const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBlend: boolean }> = (() => {
+// Build CONTINUUM_PAIRS from a continuum pairs map
+function buildContinuumPairs(pairsMap: Record<number, { pairId: number; isNegative: boolean }> | undefined): Array<{ negative: number; positive: number; showBlend: boolean }> {
+  if (!pairsMap) return [];
   const seen = new Set<string>();
   const pairs: Array<{ negative: number; positive: number; showBlend: boolean }> = [];
-  for (const [auIdStr, info] of Object.entries(CONTINUUM_PAIRS_MAP)) {
+  for (const [auIdStr, info] of Object.entries(pairsMap)) {
     const auId = Number(auIdStr);
     if (info.isNegative) {
       const key = `${auId}-${info.pairId}`;
@@ -23,7 +24,7 @@ const CONTINUUM_PAIRS: Array<{ negative: number; positive: number; showBlend: bo
     }
   }
   return pairs;
-})();
+}
 import type { NormalizedSnippet } from '../../latticework/animation/types';
 import { useEngineState } from '../../context/engineContext';
 
@@ -35,14 +36,14 @@ type SnippetCurveData = {
   snippet: NormalizedSnippet;
 };
 
-type ContinuumPair = typeof CONTINUUM_PAIRS[number];
+type ContinuumPair = { negative: number; positive: number; showBlend: boolean };
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 const continuumKey = (pair: ContinuumPair) => `${pair.negative}-${pair.positive}`;
 
-const getContinuumLabel = (pair: ContinuumPair) =>
-  CONTINUUM_LABELS[continuumKey(pair)] ?? `AU ${pair.negative} ↔ AU ${pair.positive}`;
+const getContinuumLabel = (pair: ContinuumPair, labels: Record<string, string>) =>
+  labels[continuumKey(pair)] ?? `AU ${pair.negative} ↔ AU ${pair.positive}`;
 
 // Linear interpolation helper to reconstruct a curve's value at an arbitrary time
 const getValueAtTime = (keyframes: Keyframe[], time: number): number => {
@@ -133,9 +134,15 @@ function AUSection({
   engine,
   disabled = false,
   useCurveEditor = false,
-  auSnippetCurves = {}
+  auSnippetCurves = {},
 }: AUSectionProps) {
   const { anim } = useEngineState();
+
+  // Get continuum pairs and labels from engine config - works for any character
+  const config = engine?.getAUMappings();
+  const continuumPairsMap = config?.continuumPairs;
+  const continuumLabels = config?.continuumLabels || {};
+  const CONTINUUM_PAIRS = buildContinuumPairs(continuumPairsMap);
 
   // Build a map of AU ID to continuum pair info
   const continuumMap = new Map<number, { pair: typeof CONTINUUM_PAIRS[0]; isNegative: boolean }>();
@@ -214,7 +221,7 @@ function AUSection({
                 renderedAUs.add(pairedAU.id);
 
                 const continuumCurves = buildContinuumCurveData(pair, auSnippetCurves);
-                const label = getContinuumLabel(pair);
+                const label = getContinuumLabel(pair, continuumLabels);
 
                 if (continuumCurves.length === 0) {
                   return (
