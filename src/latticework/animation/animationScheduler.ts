@@ -1,5 +1,5 @@
-import type { Snippet, HostCaps, ScheduleOpts } from './types';
-import type { TransitionHandle, ClipHandle } from 'loomlarge';
+import type { Snippet, HostCaps, ScheduleOpts, ClipHandle } from './types';
+import type { TransitionHandle } from 'loomlarge';
 import { VISEME_KEYS } from 'loomlarge';
 import { animationEventEmitter } from './animationService';
 
