@@ -1,12 +1,13 @@
 import { memo, useCallback, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Switch } from '@chakra-ui/react';
-import { FaChevronLeft, FaChevronRight, FaCamera, FaVideo } from 'react-icons/fa';
+import { FaChevronLeft, FaChevronRight, FaCamera, FaVideo, FaPlus } from 'react-icons/fa';
 import { useModulesContext } from '../context/ModulesContext';
 import { useThreeOptional } from '../context/threeContext';
 import { ANNOTATION_REGISTRY, getAnnotationConfig } from '../presets/annotations';
 import { createCaptureService, type CaptureService } from '../services/captureService';
 import type { CharacterAnnotationConfig } from '../camera/types';
+import CharacterUploadWizard from './CharacterUploadWizard';
 
 // CSS styles for the component
 const switcherStyles = `
@@ -73,7 +74,8 @@ const switcherStyles = `
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     width: 260px;
-    overflow: hidden;
+    overflow: visible;
+    clip-path: inset(-100px 0 -100px 0);
   }
   .character-cards-track {
     display: flex;
@@ -137,18 +139,14 @@ const switcherStyles = `
     0%, 100% { opacity: 0.7; }
     50% { opacity: 1; }
   }
-  @keyframes thumbnail-breathe {
-    0% {
+  @keyframes thumbnail-grow {
+    from {
       transform: scale(1.4);
       filter: brightness(1.25) saturate(1.1);
     }
-    50% {
+    to {
       transform: scale(1.55);
       filter: brightness(1.45) saturate(1.15);
-    }
-    100% {
-      transform: scale(1.4);
-      filter: brightness(1.25) saturate(1.1);
     }
   }
   .character-card {
@@ -162,9 +160,10 @@ const switcherStyles = `
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-                background 0.3s ease,
-                box-shadow 0.3s ease;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.4s ease,
+                box-shadow 0.4s ease,
+                border-color 0.4s ease;
     position: relative;
     overflow: hidden;
     z-index: 1;
@@ -174,6 +173,8 @@ const switcherStyles = `
     transform: scale(1.6);
     z-index: 100;
     animation: rainbow-glow 3s linear infinite, glow-pulse 2s ease-in-out infinite;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                background 0.3s ease;
   }
   .character-card.active {
     border-color: #4299E1;
@@ -192,18 +193,39 @@ const switcherStyles = `
   .character-card:hover .character-card-placeholder {
     transform: scale(1.4);
   }
+  .character-card.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: grayscale(0.5);
+  }
+  .character-card.disabled:hover {
+    transform: scale(1);
+    animation: none;
+    background: rgba(45, 55, 72, 0.8);
+    box-shadow: none;
+    border-color: transparent;
+  }
+  .character-card.disabled .character-card-placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+  .character-card.disabled:hover .character-card-placeholder {
+    transform: scale(1);
+  }
   .character-card-thumbnail {
     width: 100%;
     height: 100%;
     object-fit: cover;
     border-radius: 6px;
-    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-                filter 0.3s ease;
+    transform: scale(1);
+    filter: brightness(1) saturate(1);
+    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+                filter 0.8s ease;
   }
   .character-card:hover .character-card-thumbnail {
-    animation: thumbnail-breathe 2s ease-in-out 0.4s infinite;
+    animation: thumbnail-grow 1s ease-out 0.4s forwards;
     transform: scale(1.4);
     filter: brightness(1.25) saturate(1.1);
+    transition: none;
   }
   .character-card-tooltip {
     position: absolute;
@@ -307,6 +329,26 @@ const switcherStyles = `
     padding-left: 6px;
     border-left: 1px solid rgba(255, 255, 255, 0.1);
   }
+  .upload-btn {
+    width: 72px;
+    height: 56px;
+    border-radius: 8px;
+    background: rgba(45, 55, 72, 0.6);
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .upload-btn:hover {
+    background: rgba(66, 153, 225, 0.3);
+    border-color: rgba(66, 153, 225, 0.5);
+    color: white;
+  }
 `;
 
 // Inject styles once
@@ -383,6 +425,7 @@ export const CharacterSwitcher = memo(function CharacterSwitcher({
   const captureServiceRef = useRef<CaptureService | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
+  const [isUploadWizardOpen, setIsUploadWizardOpen] = useState(false);
 
   // Inject styles on mount
   if (typeof window !== 'undefined') {
@@ -514,17 +557,19 @@ export const CharacterSwitcher = memo(function CharacterSwitcher({
             >
               {allCharacters.map((char) => {
                 const thumbnail = getCharacterThumbnail(char.characterId);
+                const isDisabled = char.isPlaceholder;
                 return (
                   <div
                     key={char.characterId}
-                    className={`character-card ${currentCharacterConfig?.characterId === char.characterId ? 'active' : ''}`}
-                    onClick={() => !char.isPlaceholder && handleCharacterClick(char.characterId)}
-                    style={char.isPlaceholder ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                    className={`character-card ${currentCharacterConfig?.characterId === char.characterId ? 'active' : ''} ${isDisabled ? 'disabled' : ''}`}
+                    onClick={() => !isDisabled && handleCharacterClick(char.characterId)}
                     onMouseEnter={(e) => {
+                      if (isDisabled) return;
                       const video = e.currentTarget.querySelector('video');
                       if (video) video.play();
                     }}
                     onMouseLeave={(e) => {
+                      if (isDisabled) return;
                       const video = e.currentTarget.querySelector('video');
                       if (video) {
                         video.pause();
@@ -552,6 +597,14 @@ export const CharacterSwitcher = memo(function CharacterSwitcher({
                   </div>
                 );
               })}
+              {/* Upload Button */}
+              <div
+                className="upload-btn"
+                onClick={() => setIsUploadWizardOpen(true)}
+                title="Upload Character"
+              >
+                <FaPlus />
+              </div>
             </div>
           </div>
 
@@ -650,6 +703,17 @@ export const CharacterSwitcher = memo(function CharacterSwitcher({
           </button>
         </div>
       </div>
+
+      {/* Character Upload Wizard */}
+      <CharacterUploadWizard
+        isOpen={isUploadWizardOpen}
+        onClose={() => setIsUploadWizardOpen(false)}
+        onUpload={(config) => {
+          if (onCharacterChange) {
+            onCharacterChange(config);
+          }
+        }}
+      />
     </div>
   );
 });

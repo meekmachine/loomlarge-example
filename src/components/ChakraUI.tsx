@@ -37,7 +37,7 @@ export default function ChakraUI({
         onCharacterChange={onCharacterChange}
         currentCharacterConfig={currentCharacterConfig}
       />
-      <ModulesMenu animationManager={animationManager} />
+      <ModulesMenu animationManager={animationManager} characterName={currentCharacterConfig?.characterName} />
     </ChakraProvider>
   );
 }

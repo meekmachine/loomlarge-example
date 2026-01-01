@@ -32,14 +32,45 @@ function AppContent() {
   const [annotationConfig, setAnnotationConfig] = useState<CharacterAnnotationConfig | undefined>(
     getDefaultCharacterConfig()
   );
+  // Track previous config for fallback on load error
+  const [previousConfig, setPreviousConfig] = useState<CharacterAnnotationConfig | undefined>(
+    getDefaultCharacterConfig()
+  );
 
   // Handle character change from CharacterSection
   const handleCharacterChange = useCallback((config: CharacterAnnotationConfig) => {
+    // Save current config as fallback before changing
+    setPreviousConfig(annotationConfig);
     setIsLoading(true);
     setLoadProgress(0);
     setAnimationReady(false);
     setAnnotationConfig(config);
-  }, []);
+  }, [annotationConfig]);
+
+  // Handle load error - show toast and revert to previous character
+  const handleLoadError = useCallback((error: Error, characterId?: string) => {
+    console.error(`Failed to load character ${characterId}:`, error);
+
+    // Show error toast after Chakra loads
+    getToaster().then(({ toaster }) => {
+      toaster.create({
+        title: 'Failed to load character',
+        description: `Could not load ${characterId || 'character'}. Reverting to previous character.`,
+        type: 'error',
+        duration: 4000,
+      });
+    });
+
+    // Revert to previous config (or default if no previous)
+    const fallback = previousConfig || getDefaultCharacterConfig();
+    if (fallback && fallback.characterId !== characterId) {
+      setAnnotationConfig(fallback);
+      setLoadProgress(0);
+    } else {
+      // If fallback is the same as failed, just stop loading
+      setIsLoading(false);
+    }
+  }, [previousConfig]);
 
   const handleReady = useCallback(
     ({ cameraController, engine, anim, scene, renderer }: CharacterReady) => {
@@ -81,9 +112,11 @@ function AppContent() {
     };
   }, [threeCtx?.engine, threeCtx?.anim, animationReady, setEyeHeadTrackingService]);
 
-  // Build GLB source from annotation config
+  // Build GLB source from annotation config - handle blob URLs for uploaded characters
   const glbSrc = annotationConfig
-    ? import.meta.env.BASE_URL + annotationConfig.modelPath
+    ? annotationConfig.modelPath.startsWith('blob:')
+      ? annotationConfig.modelPath
+      : import.meta.env.BASE_URL + annotationConfig.modelPath
     : import.meta.env.BASE_URL + "characters/jonathan_new.glb";
 
   return (
@@ -101,6 +134,7 @@ function AppContent() {
         className="fullscreen-scene"
         onReady={handleReady}
         onProgress={setLoadProgress}
+        onError={handleLoadError}
         annotationConfig={annotationConfig}
       />
 
