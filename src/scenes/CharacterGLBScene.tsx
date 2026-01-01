@@ -20,8 +20,7 @@ function createEngineAdapter(engine: LoomLargeThree): Engine {
     setViseme: (idx, v, jawScale) => engine.setViseme(idx, v, jawScale),
     transitionViseme: (idx, v, dur, jawScale) => engine.transitionViseme(idx, v, dur, jawScale),
     getCompositeRotations: () => engine.getCompositeRotations(),
-    // NEW: buildClip for AnimationMixer-based clip playback
-    buildClip: (clipName, curves, options) => engine.buildClip(clipName, curves, options),
+    // buildClip removed - using legacy transitionAU path until engine supports it
     onSnippetEnd: (name) => {
       try {
         window.dispatchEvent(new CustomEvent('visos:snippetEnd', { detail: { name } }));
