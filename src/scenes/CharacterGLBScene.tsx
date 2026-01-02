@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { LoomLargeThree, CC4_PRESET } from 'loomlarge';
+import { LoomLargeThree, CC4_PRESET } from 'loom3';
 import { AU_MAPPING_CONFIG } from '../presets/bettaFish';
 import { AnnotationCameraController } from '../camera';
 import { createAnimationService, type AnimationService } from '../latticework/animation/animationService';

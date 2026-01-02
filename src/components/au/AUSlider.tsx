@@ -8,7 +8,7 @@ import {
   VStack,
   HStack
 } from '@chakra-ui/react';
-import { LoomLargeThree, isMixedAU, hasLeftRightMorphs } from 'loomlarge';
+import { LoomLargeThree, isMixedAU, hasLeftRightMorphs } from 'loom3';
 
 interface AUSliderProps {
   au: string | number;

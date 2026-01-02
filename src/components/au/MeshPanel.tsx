@@ -10,7 +10,7 @@ import {
   NativeSelect,
   Slider,
 } from '@chakra-ui/react';
-import { LoomLargeThree } from 'loomlarge';
+import { LoomLargeThree } from 'loom3';
 import * as THREE from 'three';
 import DockableAccordionItem from './DockableAccordionItem';
 import { LuChevronDown, LuChevronRight } from 'react-icons/lu';

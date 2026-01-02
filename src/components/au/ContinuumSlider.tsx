@@ -7,7 +7,7 @@ import {
   HStack,
   VStack
 } from '@chakra-ui/react';
-import { AUInfo, AU_MIX_DEFAULTS, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS, LoomLargeThree } from 'loomlarge';
+import { AUInfo, AU_MIX_DEFAULTS, CONTINUUM_PAIRS_MAP, CONTINUUM_LABELS, LoomLargeThree } from 'loom3';
 
 interface ContinuumSliderProps {
   negativeAU: AUInfo;

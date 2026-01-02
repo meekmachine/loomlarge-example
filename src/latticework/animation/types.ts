@@ -1,6 +1,6 @@
 // Unified types for the Animation Agency (Machine + Service + Scheduler)
 
-import type { TransitionHandle } from 'loomlarge';
+import type { TransitionHandle } from 'loom3';
 
 // Local types for clip-based playback (not yet in loomlarge)
 export interface ClipOptions {
