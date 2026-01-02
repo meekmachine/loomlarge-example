@@ -4,7 +4,7 @@ import { Plus } from 'lucide-react';
 import { toaster } from '../ui/toaster';
 import DockableAccordionItem from './DockableAccordionItem';
 import { CurveEditor } from '../CurveEditor';
-import { LoomLargeThree, VISEME_KEYS } from 'loomlarge';
+import { LoomLargeThree, VISEME_KEYS } from 'loom3';
 import type { NormalizedSnippet } from '../../latticework/animation/types';
 import { useEngineState } from '../../context/engineContext';
 

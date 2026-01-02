@@ -5,7 +5,7 @@
 
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { DirectVisemePlayer, VisemePlayerConfig, createDirectVisemePlayer } from '../utils/directVisemePlayer';
-import { LoomLargeThree } from 'loomlarge';
+import { LoomLargeThree } from 'loom3';
 
 export interface UseDirectVisemePlayerOptions extends Partial<VisemePlayerConfig> {
   /** Engine instance (required) */

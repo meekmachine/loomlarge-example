@@ -6,7 +6,7 @@ import DockableAccordionItem from './DockableAccordionItem';
 import AUSlider from './AUSlider';
 import ContinuumSlider from './ContinuumSlider';
 import { CurveEditor } from '../CurveEditor';
-import type { AUInfo, LoomLargeThree } from 'loomlarge';
+import type { AUInfo, LoomLargeThree } from 'loom3';
 
 // Build CONTINUUM_PAIRS from a continuum pairs map
 function buildContinuumPairs(pairsMap: Record<number, { pairId: number; isNegative: boolean }> | undefined): Array<{ negative: number; positive: number; showBlend: boolean }> {

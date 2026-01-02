@@ -1,9 +1,9 @@
 {
-  "name": "loomlarge",
+  "name": "loom3-example",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "homepage": "https://meekmachine.github.io/LoomLarge",
+  "homepage": "https://meekmachine.github.io/loom3",
   "scripts": {
     "start": "vite",
     "dev": "panda codegen && vite",
@@ -12,8 +12,8 @@
     "deploy": "bash scripts/deploy.sh",
     "typecheck": "tsc --noEmit",
     "prepare": "panda codegen",
-    "link:loomlarge": "rm -rf node_modules/loomlarge && ln -s ../../LoomLarge node_modules/loomlarge && echo 'Linked to local LoomLarge for development'",
-    "unlink:loomlarge": "rm -rf node_modules/loomlarge node_modules/.vite && npm install loomlarge && echo 'Now using published npm version of loomlarge (vite cache cleared)'"
+    "link:loom3": "rm -rf node_modules/loom3 && ln -s ../../LoomLarge node_modules/loom3 && echo 'Linked to local loom3 for development'",
+    "unlink:loom3": "rm -rf node_modules/loom3 node_modules/.vite && npm install loom3 && echo 'Now using published npm version of loom3 (vite cache cleared)'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
@@ -30,7 +30,7 @@
     "@xstate/react": "^6.0.0",
     "face-api.js": "^0.22.2",
     "livekit-client": "^2.8.1",
-    "loomlarge": "^0.3.0",
+    "loom3": "^0.4.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

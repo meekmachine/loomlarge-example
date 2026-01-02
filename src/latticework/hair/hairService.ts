@@ -14,7 +14,7 @@
 import { createActor } from 'xstate';
 import { hairMachine } from './hairMachine';
 import { HairObjectRef, HairEvent, HairState } from './types';
-import type { LoomLargeThree } from 'loomlarge';
+import type { LoomLargeThree } from 'loom3';
 
 // Hair physics configuration (mirrors engine config)
 interface HairPhysicsConfig {

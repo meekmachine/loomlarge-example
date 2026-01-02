@@ -5,7 +5,7 @@
  * This gives precise control over blending and timing.
  */
 
-import { LoomLargeThree } from 'loomlarge';
+import { LoomLargeThree } from 'loom3';
 import { phonemeExtractor } from '../latticework/lipsync/PhonemeExtractor';
 import { visemeMapper } from '../latticework/lipsync/VisemeMapper';
 

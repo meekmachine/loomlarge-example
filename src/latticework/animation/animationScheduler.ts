@@ -1,6 +1,6 @@
 import type { Snippet, HostCaps, ScheduleOpts, ClipHandle } from './types';
-import type { TransitionHandle } from 'loomlarge';
-import { VISEME_KEYS } from 'loomlarge';
+import type { TransitionHandle } from 'loom3';
+import { VISEME_KEYS } from 'loom3';
 import { animationEventEmitter } from './animationService';
 
 type RuntimeSched = { name: string; startsAt: number; offset: number; enabled: boolean };

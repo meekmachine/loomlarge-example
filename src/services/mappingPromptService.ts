@@ -485,7 +485,7 @@ For humanoid models, use standard FACS AU IDs:
 Provide complete TypeScript code for the preset:
 
 \`\`\`typescript
-import type { AUMappingConfig, BoneBinding, AUInfo } from 'loomlarge';
+import type { AUMappingConfig, BoneBinding, AUInfo } from 'loom3';
 
 export const BONE_NODES = {
   // semantic key: actual bone name

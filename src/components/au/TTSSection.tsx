@@ -11,7 +11,7 @@ import {
   Badge,
 } from '@chakra-ui/react';
 import DockableAccordionItem from './DockableAccordionItem';
-import { LoomLargeThree } from 'loomlarge';
+import { LoomLargeThree } from 'loom3';
 import { createTTSService } from '../../latticework/tts';
 import { createLipSyncService } from '../../latticework/lipsync';
 import type { TTSService } from '../../latticework/tts/ttsService';

@@ -36,7 +36,7 @@ import {
   generateQuickDiagnosticPrompt,
   exportAllPrompts,
 } from './mappingPromptService';
-import type { AUMappingConfig } from 'loomlarge';
+import type { AUMappingConfig } from 'loom3';
 
 /**
  * Wizard state representing the current step and gathered data

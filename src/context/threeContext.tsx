@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import type { LoomLargeThree } from 'loomlarge';
+import type { LoomLargeThree } from 'loom3';
 import type { AnimationService } from '../latticework/animation/animationService';
 import { SkyboxService } from '../services/skyboxService';
 

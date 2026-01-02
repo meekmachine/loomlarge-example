@@ -5,7 +5,7 @@
 
 import { PhonemeExtractor } from './PhonemeExtractor';
 import { VisemeMapper } from './VisemeMapper';
-import { VISEME_KEYS } from 'loomlarge';
+import { VISEME_KEYS } from 'loom3';
 
 export interface TestResult {
   passed: boolean;

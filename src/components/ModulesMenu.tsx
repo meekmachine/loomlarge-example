@@ -152,33 +152,33 @@ const injectKeyframes = () => {
     @keyframes expandRingHover {
       0% {
         transform: scale(1, 1);
-        opacity: 0.25;
+        opacity: 0.35;
         filter: blur(1px);
-        box-shadow: 0 0 10px rgba(104, 211, 145, 0.18);
+        box-shadow: 0 0 10px rgba(34, 84, 61, 0.25);
       }
       10% {
         transform: scale(1.3, 1.45);
-        opacity: 0.1;
+        opacity: 0.18;
         filter: blur(2px);
-        box-shadow: 0 0 14px rgba(104, 211, 145, 0.1);
+        box-shadow: 0 0 14px rgba(34, 84, 61, 0.15);
       }
       25% {
         transform: scale(1.7, 1.95);
-        opacity: 0.03;
+        opacity: 0.06;
         filter: blur(3px);
-        box-shadow: 0 0 18px rgba(104, 211, 145, 0.04);
+        box-shadow: 0 0 18px rgba(34, 84, 61, 0.08);
       }
       40% {
         transform: scale(2.0, 2.3);
         opacity: 0;
         filter: blur(4px);
-        box-shadow: 0 0 0px rgba(104, 211, 145, 0);
+        box-shadow: 0 0 0px rgba(34, 84, 61, 0);
       }
       100% {
         transform: scale(2.0, 2.3);
         opacity: 0;
         filter: blur(4px);
-        box-shadow: 0 0 0px rgba(104, 211, 145, 0);
+        box-shadow: 0 0 0px rgba(34, 84, 61, 0);
       }
     }
 

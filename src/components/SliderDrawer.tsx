@@ -12,7 +12,7 @@ import {
 } from '@chakra-ui/react';
 import { useSelector } from '@xstate/react';
 import { FaBars, FaPlay, FaSmile, FaComment, FaEye, FaCut, FaCubes, FaMicrophone, FaRegEyeSlash, FaGlobe, FaTheaterMasks } from 'react-icons/fa';
-import type { AUInfo } from 'loomlarge';
+import type { AUInfo } from 'loom3';
 import AUSection from './au/AUSection';
 import VisemeSection from './au/VisemeSection';
 import TTSSection from './au/TTSSection';
@@ -25,7 +25,7 @@ import MeshPanel from './au/MeshPanel';
 import SkyboxSection from './au/SkyboxSection';
 import { useThreeState } from '../context/threeContext';
 import type { NormalizedSnippet, CurvePoint } from '../latticework/animation/types';
-import { LoomLargeThree } from 'loomlarge';
+import { LoomLargeThree } from 'loom3';
 
 // Stable empty array reference - MUST be outside component to prevent re-renders
 const EMPTY_SNIPPETS: NormalizedSnippet[] = [];
